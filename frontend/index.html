@@ -1,141 +1,18 @@
-<!DOCTYPE html>
+﻿<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Email Sender Assistant</title>
+    <title>AI Email Studio — Gemini & Gmail</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <main class="app-shell">
-      <section class="hero-card">
-        <p class="eyebrow">AI Email Studio</p>
-        <h1>Generate polished emails in a chat-style workspace.</h1>
-        <p class="subtitle">
-          Describe the email you need, and the assistant will draft it using the
-          backend <code>generate-email</code> endpoint.
-        </p>
-      </section>
-
-      <section class="chat-panel">
-        <header class="chat-header">
-          <div>
-            <p class="chat-title">Email Assistant</p>
-            <p class="chat-status">
-              Drafts from <code>/api/ai/generate-email</code> and delivery through
-              <code>/api/gmail/send</code>
-            </p>
-          </div>
-          <button id="clearChat" class="ghost-button" type="button">Clear</button>
-        </header>
-
-        <div id="chatMessages" class="chat-messages" aria-live="polite">
-          <article class="message assistant">
-            <div class="message-stack">
-              <p class="message-author">Email Assistant</p>
-              <div class="bubble">
-                I can help you draft and send emails. Tell me who it's for and
-                what tone you want, and I'll put together a draft you can edit.
-              </div>
-            </div>
-          </article>
-        </div>
-
-        <div class="quick-prompts" aria-label="Suggested prompts">
-          <button class="prompt-chip" type="button" data-prompt="Write a polite follow-up email after an interview.">
-            Interview follow-up
-          </button>
-          <button class="prompt-chip" type="button" data-prompt="Draft a professional project status update email for my manager.">
-            Project update
-          </button>
-          <button class="prompt-chip" type="button" data-prompt="Create a friendly meeting request email for next week.">
-            Meeting request
-          </button>
-        </div>
-
-        <form id="chatForm" class="composer">
-          <label class="sr-only" for="instruction">Email instruction</label>
-          <textarea
-            id="instruction"
-            name="instruction"
-            rows="3"
-            placeholder="Ask for an email draft..."
-            required
-          ></textarea>
-          <div class="composer-actions">
-            <p class="hint">Backend URL: <code id="apiBaseLabel">http://127.0.0.1:8000</code></p>
-            <button id="generateButton" class="send-button" type="submit">Generate Email</button>
-          </div>
-        </form>
-      </section>
-    </main>
-
-    <template id="textMessageTemplate">
-      <article class="message">
-        <div class="message-stack">
-          <p class="message-author"></p>
-          <div class="bubble"></div>
-        </div>
-      </article>
-    </template>
-
-    <template id="draftMessageTemplate">
-      <article class="message assistant">
-        <div class="bubble draft-bubble">
-          <div class="draft-card">
-            <div class="draft-card-header">
-              <div>
-                <p class="draft-label">Generated Draft</p>
-                <p class="draft-meta">Review, edit, and send this email.</p>
-              </div>
-              <span class="draft-status" data-role="draft-status">Ready to review</span>
-            </div>
-
-            <div class="draft-grid">
-              <label class="draft-field">
-                <span>To</span>
-                <input data-field="to" type="email" readonly />
-              </label>
-              <label class="draft-field">
-                <span>Subject</span>
-                <input data-field="subject" type="text" readonly />
-              </label>
-            </div>
-
-            <label class="draft-field">
-              <span>Body</span>
-              <textarea data-field="body" rows="10" readonly></textarea>
-            </label>
-
-            <label class="draft-field">
-              <span>Resume Attachment</span>
-              <input
-                data-field="attachment"
-                type="file"
-                accept=".pdf,.doc,.docx"
-              />
-            </label>
-
-            <p class="attachment-note" data-role="attachment-note">
-              No resume attached yet.
-            </p>
-
-            <div class="draft-actions">
-              <button type="button" class="ghost-button" data-action="edit">Edit</button>
-              <button type="button" class="ghost-button" data-action="save" hidden>Save</button>
-              <button type="button" class="send-button" data-action="send">Send</button>
-            </div>
-          </div>
-        </div>
-      </article>
-    </template>
-
-    <script src="./script.js"></script>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

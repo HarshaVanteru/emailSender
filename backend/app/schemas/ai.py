@@ -1,19 +1,17 @@
-from pydantic import BaseModel, ConfigDict
+from typing import Literal
+
+from pydantic import BaseModel
 
 
 class ChatMessage(BaseModel):
-    role: str
+    role: Literal["user", "assistant", "system"]
     content: str
-
 
 class GenerateEmailRequest(BaseModel):
     instruction: str
-    messages: list[ChatMessage] = []
-
+    messages: list[ChatMessage] | None = None
 
 class GeneratedEmail(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
     to: str
     subject: str
     body: str

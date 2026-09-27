@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "backend-architect": {
+      "source": "sickn33/agentic-awesome-skills",
+      "sourceType": "github",
+      "skillPath": "skills/backend-architect/SKILL.md",
+      "computedHash": "077ff029f39cc07caed1a4869075cbe189d26a891752dd1217fc9f78141148e7"
+    },
+    "modern-web-guidance": {
+      "source": "GoogleChrome/modern-web-guidance",
+      "sourceType": "github",
+      "skillPath": "skills/modern-web-guidance/SKILL.md",
+      "computedHash": "cd6b0db01b54ac29fc5072679ea6ca03d843c9e3611a6809b888756df02bd4a7"
+    },
+    "python-fastapi-development": {
+      "source": "sickn33/agentic-awesome-skills",
+      "sourceType": "github",
+      "skillPath": "skills/python-fastapi-development/SKILL.md",
+      "computedHash": "6a10c81e0950222a80d56b187208ace22beef7b19fefacdc025115473c13f245"
+    }
+  }
+}
