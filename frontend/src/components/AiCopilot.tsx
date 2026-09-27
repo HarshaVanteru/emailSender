@@ -1,4 +1,4 @@
-﻿import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Sparkles, Trash2, Bot, ArrowUp } from 'lucide-react';
 import type { ChatMessage } from '../types';
 
