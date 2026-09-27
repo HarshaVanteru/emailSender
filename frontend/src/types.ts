@@ -27,6 +27,14 @@ export interface GmailProfile {
   name?: string;
   signature?: string;
   preferences?: string;
+  bio?: string;
+}
+
+export interface CopilotResponse {
+  needs_clarification: boolean;
+  question?: string | null;
+  draft?: GeneratedEmail | null;
+  message?: string | null;
 }
 
 export interface SendEmailResponse {

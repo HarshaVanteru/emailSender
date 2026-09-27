@@ -52,24 +52,48 @@ export const App: React.FC = () => {
     setIsGenerating(true);
 
     try {
-      const generated = await generateEmailDraft(instruction, updatedMessages);
-      setDraft(generated);
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content: `Draft generated for "${generated.to || 'recipient'}" with subject "${generated.subject}".`,
-        },
-      ]);
-      if (window.innerWidth < 1024) {
-        setMobileTab('composer');
+      const response = await generateEmailDraft(instruction, updatedMessages);
+      if (response.needs_clarification && response.question) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: 'assistant',
+            content: response.question!,
+          },
+        ]);
+      } else if (response.draft) {
+        setDraft({
+          to: response.draft.to || '',
+          subject: response.draft.subject || '',
+          body: response.draft.body || '',
+        });
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: 'assistant',
+            content:
+              response.message ||
+              `Draft generated for "${response.draft?.to || 'recipient'}" with subject "${response.draft?.subject}".`,
+          },
+        ]);
+        if (window.innerWidth < 1024) {
+          setMobileTab('composer');
+        }
+      } else if (response.message) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: 'assistant',
+            content: response.message!,
+          },
+        ]);
       }
     } catch (err: any) {
       setMessages((prev) => [
         ...prev,
         {
           role: 'assistant',
-          content: `Failed to generate draft: ${err.message}`,
+          content: `Failed to process request: ${err.message}`,
         },
       ]);
     } finally {

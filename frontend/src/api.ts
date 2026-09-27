@@ -1,4 +1,4 @@
-import type { ChatMessage, GeneratedEmail, SendEmailPayload, SendEmailResponse, GmailProfile } from './types';
+import type { ChatMessage, CopilotResponse, SendEmailPayload, SendEmailResponse, GmailProfile } from './types';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 
@@ -36,7 +36,7 @@ export async function fetchGmailProfile(): Promise<GmailProfile | null> {
   }
 }
 
-export async function updateProfile(data: { name?: string; signature?: string; preferences?: string }): Promise<void> {
+export async function updateProfile(data: { name?: string; signature?: string; preferences?: string; bio?: string }): Promise<void> {
   const res = await fetch(`${API_BASE}/api/gmail/profile`, {
     method: 'PUT',
     headers: {
@@ -58,7 +58,7 @@ export function getGmailAuthUrl(): string {
 export async function generateEmailDraft(
   instruction: string,
   history: ChatMessage[] = []
-): Promise<GeneratedEmail> {
+): Promise<CopilotResponse> {
   const res = await fetch(`${API_BASE}/api/ai/generate-email`, {
     method: 'POST',
     headers: {

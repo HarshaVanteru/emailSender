@@ -94,6 +94,7 @@ def get_profile(current_user: User = Depends(get_current_user)):
         "name": current_user.name,
         "signature": current_user.signature,
         "preferences": current_user.preferences,
+        "bio": current_user.bio,
         "is_connected": bool(current_user.google_token),
     }
 
@@ -106,6 +107,7 @@ def update_profile(
     if request.name is not None: current_user.name = request.name
     if request.signature is not None: current_user.signature = request.signature
     if request.preferences is not None: current_user.preferences = request.preferences
+    if request.bio is not None: current_user.bio = request.bio
     user_repository.update(db, current_user)
     return {"message": "Profile updated successfully"}
 

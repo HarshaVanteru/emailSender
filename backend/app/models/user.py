@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String
+from sqlalchemy import Column, Integer, String, Text
 
 from app.core.database import Base
 
@@ -11,3 +11,4 @@ class User(Base):
     google_token = Column(String(2048), nullable=True)
     signature = Column(String(1024), nullable=True)
     preferences = Column(String(2048), nullable=True)
+    bio = Column(Text, nullable=True)

@@ -97,8 +97,8 @@ export const EmailComposer: React.FC<EmailComposerProps> = ({
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
-  const wordCount = draft.body.trim() ? draft.body.trim().split(/\s+/).length : 0;
-  const isFormValid = draft.to.trim().length > 0 && draft.subject.trim().length > 0 && draft.body.trim().length > 0;
+  const draftBody = draft?.body || ''; const draftTo = draft?.to || ''; const draftSubject = draft?.subject || ''; const wordCount = draftBody.trim() ? draftBody.trim().split(/\s+/).length : 0;
+  const isFormValid = draftTo.trim().length > 0 && draftSubject.trim().length > 0 && draftBody.trim().length > 0;
 
   return (
     <div className="flex flex-col h-full bg-white select-none">
@@ -191,7 +191,7 @@ export const EmailComposer: React.FC<EmailComposerProps> = ({
                 id="recipient"
                 type="email"
                 placeholder="recipient@example.com"
-                value={draft.to}
+                value={draftTo}
                 onChange={(e) => onChangeDraft({ to: e.target.value })}
                 className="flex-1 text-xs sm:text-sm text-zinc-900 placeholder-zinc-300 focus:outline-hidden font-normal"
               />
@@ -204,7 +204,7 @@ export const EmailComposer: React.FC<EmailComposerProps> = ({
                 id="subject"
                 type="text"
                 placeholder="Subject line"
-                value={draft.subject}
+                value={draftSubject}
                 onChange={(e) => onChangeDraft({ subject: e.target.value })}
                 className="flex-1 text-xs sm:text-sm font-medium text-zinc-900 placeholder-zinc-300 focus:outline-hidden"
               />
@@ -215,7 +215,7 @@ export const EmailComposer: React.FC<EmailComposerProps> = ({
               <textarea
                 rows={16}
                 placeholder="Draft message content..."
-                value={draft.body}
+                value={draftBody}
                 onChange={(e) => onChangeDraft({ body: e.target.value })}
                 className="w-full text-xs sm:text-sm leading-relaxed text-zinc-800 placeholder-zinc-300 focus:outline-hidden resize-none bg-transparent font-normal"
               />
