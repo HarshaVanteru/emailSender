@@ -27,14 +27,17 @@ app.add_middleware(
 app.include_router(gmail_router)
 app.include_router(ai_router)
 
+
 @app.get("/api/health")
 def health():
     return {"status": "healthy", "service": "emailSender API"}
+
 
 DIST_DIR = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 if DIST_DIR.exists():
     app.mount("/", StaticFiles(directory=str(DIST_DIR), html=True), name="frontend")
 else:
+
     @app.get("/")
     def root():
         return {"message": "emailSender API is running", "docs": "/docs"}

@@ -6,11 +6,13 @@ class EmailAttachment(BaseModel):
     content_type: str
     data: str
 
+
 class SendEmailRequest(BaseModel):
     to: EmailStr
     subject: str
     body: str
     attachment: EmailAttachment | None = None
+
 
 class ProfileUpdateRequest(BaseModel):
     name: str | None = None

@@ -18,4 +18,5 @@ class UserRepository:
         db.refresh(user)
         return user
 
+
 user_repository = UserRepository()

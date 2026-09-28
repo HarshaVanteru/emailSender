@@ -34,7 +34,9 @@ class GmailService:
 
     def get_gmail_service(self, google_token: str):
         if not google_token:
-            raise ValueError("Gmail credentials not provided. Please authenticate via /api/gmail/auth first.")
+            raise ValueError(
+                "Gmail credentials not provided. Please authenticate via /api/gmail/auth first."
+            )
 
         token_data = json.loads(google_token)
         credentials = Credentials(
@@ -47,7 +49,14 @@ class GmailService:
         )
         return build("gmail", "v1", credentials=credentials)
 
-    def send_email(self, to: str, subject: str, body: str, attachment: dict | None = None, google_token: str | None = None):
+    def send_email(
+        self,
+        to: str,
+        subject: str,
+        body: str,
+        attachment: dict | None = None,
+        google_token: str | None = None,
+    ):
         service = self.get_gmail_service(google_token)
         message = EmailMessage()
         message["To"] = to
@@ -55,7 +64,9 @@ class GmailService:
         message.set_content(body)
 
         if attachment:
-            content_type = attachment.get("content_type") or (guess_type(attachment["filename"])[0] or "application/octet-stream")
+            content_type = attachment.get("content_type") or (
+                guess_type(attachment["filename"])[0] or "application/octet-stream"
+            )
             maintype, subtype = content_type.split("/", 1)
             file_bytes = base64.b64decode(attachment["data"])
             message.add_attachment(
@@ -66,6 +77,12 @@ class GmailService:
             )
 
         encoded_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
-        return service.users().messages().send(userId="me", body={"raw": encoded_message}).execute()
+        return (
+            service.users()
+            .messages()
+            .send(userId="me", body={"raw": encoded_message})
+            .execute()
+        )
+
 
 gmail_service = GmailService()
