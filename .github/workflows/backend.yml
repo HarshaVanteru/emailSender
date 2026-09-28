@@ -1,4 +1,4 @@
-﻿# Backend: test, build an image, push it to GHCR, then tell the server to pull it.
+# Backend: test, build an image, push it to GHCR, then tell the server to pull it.
 #
 # Secrets this needs (Settings -> Secrets and variables -> Actions):
 #   GHCR_USERNAME    GitHub username that owns the package
@@ -122,7 +122,6 @@ jobs:
       GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
       GHCR_PAT: ${{ secrets.GHCR_PAT }}
       IMAGE: ${{ needs.build.outputs.image }}:${{ github.sha }}
-      SERVICE_NAME: ${{ env.SERVICE_NAME }}
     steps:
       - name: Set up the ssh key
         run: |
