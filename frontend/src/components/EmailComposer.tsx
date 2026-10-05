@@ -101,9 +101,9 @@ export const EmailComposer: React.FC<EmailComposerProps> = ({
   const isFormValid = draftTo.trim().length > 0 && draftSubject.trim().length > 0 && draftBody.trim().length > 0;
 
   return (
-    <div className="flex flex-col h-full bg-white select-none">
+    <div className="flex flex-col h-full bg-white select-none dark:bg-zinc-950">
       {/* Top Toolbar */}
-      <div className="h-10 px-5 border-b border-zinc-200 flex items-center justify-between shrink-0 bg-white">
+      <div className="h-10 px-5 border-b border-zinc-200 flex items-center justify-between shrink-0 bg-white dark:border-zinc-800 dark:bg-zinc-950">
         <div className="flex items-center gap-3">
           {/* Minimal tab buttons */}
           <div className="flex items-center gap-1">
@@ -111,8 +111,8 @@ export const EmailComposer: React.FC<EmailComposerProps> = ({
               onClick={() => setViewMode('edit')}
               className={`px-2 py-0.5 rounded text-xs font-medium transition-colors cursor-pointer ${
                 viewMode === 'edit'
-                  ? 'bg-zinc-100 text-zinc-900'
-                  : 'text-zinc-500 hover:text-zinc-800'
+                  ? 'bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100'
+                  : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
               }`}
             >
               Edit
@@ -121,8 +121,8 @@ export const EmailComposer: React.FC<EmailComposerProps> = ({
               onClick={() => setViewMode('preview')}
               className={`px-2 py-0.5 rounded text-xs font-medium transition-colors cursor-pointer ${
                 viewMode === 'preview'
-                  ? 'bg-zinc-100 text-zinc-900'
-                  : 'text-zinc-500 hover:text-zinc-800'
+                  ? 'bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100'
+                  : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
               }`}
             >
               Preview
@@ -137,7 +137,7 @@ export const EmailComposer: React.FC<EmailComposerProps> = ({
         <div className="flex items-center gap-1.5">
           <button
             onClick={handleCopy}
-            className="flex items-center gap-1 text-[11px] text-zinc-600 hover:text-zinc-900 px-2 py-0.5 rounded hover:bg-zinc-100 transition-colors cursor-pointer"
+            className="flex items-center gap-1 text-[11px] text-zinc-600 hover:text-zinc-900 px-2 py-0.5 rounded hover:bg-zinc-100 transition-colors cursor-pointer dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
             title="Copy draft"
           >
             {copied ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3 text-zinc-400" />}
@@ -146,7 +146,7 @@ export const EmailComposer: React.FC<EmailComposerProps> = ({
 
           <button
             onClick={onResetDraft}
-            className="flex items-center gap-1 text-[11px] text-zinc-400 hover:text-rose-600 px-2 py-0.5 rounded hover:bg-zinc-100 transition-colors cursor-pointer"
+            className="flex items-center gap-1 text-[11px] text-zinc-400 hover:text-rose-600 px-2 py-0.5 rounded hover:bg-zinc-100 transition-colors cursor-pointer dark:hover:bg-zinc-800"
             title="Reset fields"
           >
             <RotateCcw className="w-3 h-3" />
@@ -157,7 +157,7 @@ export const EmailComposer: React.FC<EmailComposerProps> = ({
 
       {/* Notifications */}
       {sendSuccessId && (
-        <div className="mx-5 mt-3 p-2.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-900 flex items-center justify-between text-xs select-text">
+        <div className="mx-5 mt-3 p-2.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-900 flex items-center justify-between text-xs select-text dark:border-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-200">
           <div className="flex items-center gap-2">
             <MailCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
             <span>Sent. ID: <code className="font-mono">{sendSuccessId}</code></span>
@@ -169,7 +169,7 @@ export const EmailComposer: React.FC<EmailComposerProps> = ({
       )}
 
       {errorMessage && (
-        <div className="mx-5 mt-3 p-2.5 rounded-md bg-rose-50 border border-rose-200 text-rose-900 flex items-center justify-between text-xs select-text">
+        <div className="mx-5 mt-3 p-2.5 rounded-md bg-rose-50 border border-rose-200 text-rose-900 flex items-center justify-between text-xs select-text dark:border-rose-900 dark:bg-rose-950/50 dark:text-rose-200">
           <div className="flex items-center gap-2">
             <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
             <span>{errorMessage}</span>
@@ -185,7 +185,7 @@ export const EmailComposer: React.FC<EmailComposerProps> = ({
         {viewMode === 'edit' ? (
           <div className="space-y-2.5 max-w-3xl">
             {/* To */}
-            <div className="flex items-center gap-2 border-b border-zinc-100 pb-2">
+              <div className="flex items-center gap-2 border-b border-zinc-100 pb-2 dark:border-zinc-800">
               <span className="w-16 font-mono text-[11px] text-zinc-400 select-none">To</span>
               <input
                 id="recipient"
@@ -193,12 +193,12 @@ export const EmailComposer: React.FC<EmailComposerProps> = ({
                 placeholder="recipient@example.com"
                 value={draftTo}
                 onChange={(e) => onChangeDraft({ to: e.target.value })}
-                className="flex-1 text-xs sm:text-sm text-zinc-900 placeholder-zinc-300 focus:outline-hidden font-normal"
+                className="flex-1 text-xs sm:text-sm text-zinc-900 placeholder-zinc-300 focus:outline-hidden font-normal dark:bg-transparent dark:text-zinc-100 dark:placeholder-zinc-600"
               />
             </div>
 
             {/* Subject */}
-            <div className="flex items-center gap-2 border-b border-zinc-100 pb-2">
+              <div className="flex items-center gap-2 border-b border-zinc-100 pb-2 dark:border-zinc-800">
               <span className="w-16 font-mono text-[11px] text-zinc-400 select-none">Subject</span>
               <input
                 id="subject"
@@ -206,7 +206,7 @@ export const EmailComposer: React.FC<EmailComposerProps> = ({
                 placeholder="Subject line"
                 value={draftSubject}
                 onChange={(e) => onChangeDraft({ subject: e.target.value })}
-                className="flex-1 text-xs sm:text-sm font-medium text-zinc-900 placeholder-zinc-300 focus:outline-hidden"
+                className="flex-1 text-xs sm:text-sm font-medium text-zinc-900 placeholder-zinc-300 focus:outline-hidden dark:bg-transparent dark:text-zinc-100 dark:placeholder-zinc-600"
               />
             </div>
 
@@ -217,12 +217,12 @@ export const EmailComposer: React.FC<EmailComposerProps> = ({
                 placeholder="Draft message content..."
                 value={draftBody}
                 onChange={(e) => onChangeDraft({ body: e.target.value })}
-                className="w-full text-xs sm:text-sm leading-relaxed text-zinc-800 placeholder-zinc-300 focus:outline-hidden resize-none bg-transparent font-normal"
+                className="w-full text-xs sm:text-sm leading-relaxed text-zinc-800 placeholder-zinc-300 focus:outline-hidden resize-none bg-transparent font-normal dark:text-zinc-200 dark:placeholder-zinc-600"
               />
             </div>
 
             {/* Attachment */}
-            <div className="pt-2 border-t border-zinc-100">
+            <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800">
               <input
                 type="file"
                 ref={fileInputRef}
@@ -232,9 +232,9 @@ export const EmailComposer: React.FC<EmailComposerProps> = ({
               />
 
               {attachment ? (
-                <div className="inline-flex items-center gap-2 bg-zinc-50 border border-zinc-200 rounded-md px-2.5 py-1 text-xs text-zinc-700">
+                <div className="inline-flex items-center gap-2 bg-zinc-50 border border-zinc-200 rounded-md px-2.5 py-1 text-xs text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
                   <FileText className="w-3.5 h-3.5 text-zinc-600" />
-                  <span className="font-medium text-zinc-900">{attachment.name}</span>
+                  <span className="font-medium text-zinc-900 dark:text-zinc-100">{attachment.name}</span>
                   <span className="text-zinc-400 font-mono text-[10px]">({formatFileSize(attachment.size)})</span>
                   <button
                     onClick={handleRemoveAttachment}
@@ -248,7 +248,7 @@ export const EmailComposer: React.FC<EmailComposerProps> = ({
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="inline-flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-900 px-2 py-1 rounded hover:bg-zinc-50 transition-colors cursor-pointer select-none"
+                  className="inline-flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-900 px-2 py-1 rounded hover:bg-zinc-50 transition-colors cursor-pointer select-none dark:hover:bg-zinc-900 dark:hover:text-zinc-100"
                 >
                   <Paperclip className="w-3 h-3 text-zinc-400" />
                   <span>Attach document</span>
@@ -259,21 +259,21 @@ export const EmailComposer: React.FC<EmailComposerProps> = ({
         ) : (
           /* Preview Mode */
           <div className="space-y-3 max-w-2xl py-2">
-            <div className="border-b border-zinc-100 pb-2.5 space-y-1">
+            <div className="border-b border-zinc-100 pb-2.5 space-y-1 dark:border-zinc-800">
               <div className="text-xs text-zinc-400">
-                To: <span className="text-zinc-800 font-mono">{draft.to || '—'}</span>
+                To: <span className="text-zinc-800 font-mono dark:text-zinc-200">{draft.to || '—'}</span>
               </div>
-              <h1 className="text-base font-semibold text-zinc-900">
+              <h1 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
                 {draft.subject || 'No subject'}
               </h1>
             </div>
 
-            <div className="text-xs sm:text-sm text-zinc-800 leading-relaxed whitespace-pre-wrap font-sans min-h-[220px]">
-              {draft.body || <span className="text-zinc-300 italic">No content</span>}
+            <div className="text-xs sm:text-sm text-zinc-800 leading-relaxed whitespace-pre-wrap font-sans min-h-[220px] dark:text-zinc-200">
+              {draft.body || <span className="text-zinc-300 italic dark:text-zinc-600">No content</span>}
             </div>
 
             {attachment && (
-              <div className="pt-2 border-t border-zinc-100 text-xs text-zinc-600 flex items-center gap-2">
+              <div className="pt-2 border-t border-zinc-100 text-xs text-zinc-600 flex items-center gap-2 dark:border-zinc-800 dark:text-zinc-400">
                 <FileText className="w-3.5 h-3.5 text-zinc-600" />
                 <span>{attachment.name} ({formatFileSize(attachment.size)})</span>
               </div>
@@ -283,7 +283,7 @@ export const EmailComposer: React.FC<EmailComposerProps> = ({
       </div>
 
       {/* Action Footer */}
-      <div className="h-11 border-t border-zinc-200 px-5 flex items-center justify-between bg-white shrink-0">
+      <div className="h-11 border-t border-zinc-200 px-5 flex items-center justify-between bg-white shrink-0 dark:border-zinc-800 dark:bg-zinc-950">
         <div>
           {!isGmailConnected && (
             <span className="text-amber-600 text-xs flex items-center gap-1 font-medium">
@@ -296,7 +296,7 @@ export const EmailComposer: React.FC<EmailComposerProps> = ({
         <div className="flex items-center gap-2">
           <button
             onClick={onResetDraft}
-            className="text-xs font-medium text-zinc-500 hover:text-zinc-800 px-2.5 py-1 rounded hover:bg-zinc-100 transition-colors cursor-pointer"
+            className="text-xs font-medium text-zinc-500 hover:text-zinc-800 px-2.5 py-1 rounded hover:bg-zinc-100 transition-colors cursor-pointer dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
           >
             Clear
           </button>
@@ -304,7 +304,7 @@ export const EmailComposer: React.FC<EmailComposerProps> = ({
           <button
             onClick={handleSend}
             disabled={isSending || !isFormValid}
-            className="inline-flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 disabled:bg-zinc-200 text-white disabled:text-zinc-400 text-xs font-medium px-3.5 py-1.5 rounded-md transition-all cursor-pointer disabled:cursor-not-allowed shadow-2xs"
+            className="inline-flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 disabled:bg-zinc-200 text-white disabled:text-zinc-400 text-xs font-medium px-3.5 py-1.5 rounded-md transition-all cursor-pointer disabled:cursor-not-allowed shadow-2xs dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200 dark:disabled:bg-zinc-800 dark:disabled:text-zinc-500"
           >
             {isSending ? (
               <>

@@ -57,18 +57,18 @@ export const AiCopilot: React.FC<AiCopilotProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-full bg-zinc-50/60 border-r border-zinc-200 select-none">
+    <div className="flex flex-col h-full bg-zinc-50/60 border-r border-zinc-200 select-none dark:border-zinc-800 dark:bg-zinc-900/60">
       {/* Sidebar Header */}
-      <div className="h-10 px-3.5 border-b border-zinc-200 flex items-center justify-between bg-white shrink-0">
+      <div className="h-10 px-3.5 border-b border-zinc-200 flex items-center justify-between bg-white shrink-0 dark:border-zinc-800 dark:bg-zinc-950">
         <div className="flex items-center gap-1.5">
-          <Sparkles className="w-3.5 h-3.5 text-zinc-700" />
-          <span className="text-xs font-semibold text-zinc-900">Copilot</span>
+          <Sparkles className="w-3.5 h-3.5 text-zinc-700 dark:text-zinc-300" />
+          <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">Copilot</span>
         </div>
 
         {messages.length > 0 && (
           <button
             onClick={onClearChat}
-            className="text-[11px] text-zinc-400 hover:text-zinc-700 p-1 rounded transition-colors cursor-pointer flex items-center gap-1"
+            className="text-[11px] text-zinc-400 hover:text-zinc-700 p-1 rounded transition-colors cursor-pointer flex items-center gap-1 dark:hover:text-zinc-200"
             title="Clear conversation"
           >
             <Trash2 className="w-3 h-3" />
@@ -91,7 +91,7 @@ export const AiCopilot: React.FC<AiCopilotProps> = ({
                     setInput(prompt);
                     inputRef.current?.focus();
                   }}
-                  className="w-full text-left p-2 rounded-md bg-white hover:bg-zinc-100/70 border border-zinc-200/90 text-xs text-zinc-700 transition-colors cursor-pointer shadow-2xs"
+                  className="w-full text-left p-2 rounded-md bg-white hover:bg-zinc-100/70 border border-zinc-200/90 text-xs text-zinc-700 transition-colors cursor-pointer shadow-2xs dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
                 >
                   {prompt}
                 </button>
@@ -107,15 +107,15 @@ export const AiCopilot: React.FC<AiCopilotProps> = ({
                 className={`flex gap-1.5 text-xs leading-relaxed ${isUser ? 'justify-end' : 'justify-start'}`}
               >
                 {!isUser && (
-                  <div className="w-4.5 h-4.5 rounded bg-zinc-200 text-zinc-700 flex items-center justify-center shrink-0 mt-0.5">
+                  <div className="w-4.5 h-4.5 rounded bg-zinc-200 text-zinc-700 flex items-center justify-center shrink-0 mt-0.5 dark:bg-zinc-800 dark:text-zinc-300">
                     <Bot className="w-3 h-3" />
                   </div>
                 )}
                 <div
                   className={`max-w-[88%] rounded-md px-3 py-2 whitespace-pre-wrap leading-relaxed ${
                     isUser
-                      ? 'bg-zinc-900 text-white'
-                      : 'bg-white text-zinc-800 border border-zinc-200 shadow-2xs'
+                      ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
+                      : 'bg-white text-zinc-800 border border-zinc-200 shadow-2xs dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200'
                   }`}
                 >
                   {msg.content}
@@ -127,7 +127,7 @@ export const AiCopilot: React.FC<AiCopilotProps> = ({
 
         {isGenerating && (
           <div className="flex gap-2 text-xs items-center text-zinc-400">
-            <div className="w-4.5 h-4.5 rounded bg-zinc-200 text-zinc-700 flex items-center justify-center shrink-0">
+            <div className="w-4.5 h-4.5 rounded bg-zinc-200 text-zinc-700 flex items-center justify-center shrink-0 dark:bg-zinc-800 dark:text-zinc-300">
               <Bot className="w-3 h-3 animate-pulse" />
             </div>
             <span className="text-[11px] font-mono">Generating draft...</span>
@@ -138,14 +138,14 @@ export const AiCopilot: React.FC<AiCopilotProps> = ({
 
       {/* Refine Chips */}
       {hasActiveDraft && (
-        <div className="px-3 py-1.5 border-t border-zinc-200 bg-white">
+        <div className="px-3 py-1.5 border-t border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
           <div className="flex flex-wrap gap-1">
             {REFINE_CHIPS.map((chip, idx) => (
               <button
                 key={idx}
                 onClick={() => onApplyRefinePrompt(chip.instruction)}
                 disabled={isGenerating}
-                className="text-[10px] font-medium bg-zinc-50 hover:bg-zinc-100 border border-zinc-200 text-zinc-600 px-2 py-0.5 rounded transition-colors cursor-pointer disabled:opacity-50"
+                className="text-[10px] font-medium bg-zinc-50 hover:bg-zinc-100 border border-zinc-200 text-zinc-600 px-2 py-0.5 rounded transition-colors cursor-pointer disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
               >
                 + {chip.label}
               </button>
@@ -155,8 +155,8 @@ export const AiCopilot: React.FC<AiCopilotProps> = ({
       )}
 
       {/* Input Form */}
-      <form onSubmit={handleSubmit} className="p-3 border-t border-zinc-200 bg-white">
-        <div className="relative border border-zinc-200 rounded-md focus-within:border-zinc-400 focus-within:ring-1 focus-within:ring-zinc-300 transition-all bg-white flex items-center">
+      <form onSubmit={handleSubmit} className="p-3 border-t border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+        <div className="relative border border-zinc-200 rounded-md focus-within:border-zinc-400 focus-within:ring-1 focus-within:ring-zinc-300 transition-all bg-white flex items-center dark:border-zinc-800 dark:bg-zinc-900 dark:focus-within:border-zinc-600 dark:focus-within:ring-zinc-700">
           <textarea
             ref={inputRef}
             value={input}
@@ -165,12 +165,12 @@ export const AiCopilot: React.FC<AiCopilotProps> = ({
             rows={2}
             placeholder={hasActiveDraft ? "Ask AI to edit draft..." : "Describe email to generate..."}
             disabled={isGenerating}
-            className="w-full resize-none p-2 text-xs text-zinc-900 placeholder-zinc-400 focus:outline-hidden disabled:opacity-50 leading-relaxed font-normal"
+            className="w-full resize-none p-2 text-xs text-zinc-900 placeholder-zinc-400 focus:outline-hidden disabled:opacity-50 leading-relaxed font-normal dark:bg-transparent dark:text-zinc-100 dark:placeholder-zinc-500"
           />
           <button
             type="submit"
             disabled={!input.trim() || isGenerating}
-            className="m-1.5 w-6 h-6 rounded bg-zinc-900 hover:bg-zinc-800 disabled:bg-zinc-200 text-white disabled:text-zinc-400 flex items-center justify-center shrink-0 transition-colors cursor-pointer disabled:cursor-not-allowed"
+            className="m-1.5 w-6 h-6 rounded bg-zinc-900 hover:bg-zinc-800 disabled:bg-zinc-200 text-white disabled:text-zinc-400 flex items-center justify-center shrink-0 transition-colors cursor-pointer disabled:cursor-not-allowed dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200 dark:disabled:bg-zinc-800 dark:disabled:text-zinc-500"
             title="Generate"
           >
             <ArrowUp className="w-3 h-3" />

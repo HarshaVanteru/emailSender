@@ -21,6 +21,7 @@ export const App: React.FC = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [mobileTab, setMobileTab] = useState<'copilot' | 'composer'>('copilot');
   const [showSettings, setShowSettings] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(() => window.localStorage.getItem('email-studio-theme') === 'dark');
 
   const checkAuth = async () => {
     setCheckingAuth(true);
@@ -131,12 +132,18 @@ export const App: React.FC = () => {
   const hasActiveDraft = Boolean(draft.to || draft.subject || draft.body);
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-white overflow-hidden text-zinc-900">
+    <div data-theme={isDarkMode ? 'dark' : 'light'} className="h-screen w-screen flex flex-col bg-white overflow-hidden text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
       <Header
         profile={profile}
         checkingAuth={checkingAuth}
         onRefreshAuth={checkAuth}
         onOpenSettings={() => setShowSettings(true)}
+        isDarkMode={isDarkMode}
+        onToggleTheme={() => {
+          const nextTheme = !isDarkMode;
+          setIsDarkMode(nextTheme);
+          window.localStorage.setItem('email-studio-theme', nextTheme ? 'dark' : 'light');
+        }}
       />
 
       {showSettings && (
@@ -148,13 +155,13 @@ export const App: React.FC = () => {
       )}
 
       {/* Mobile Tab Toggle */}
-      <div className="lg:hidden flex border-b border-zinc-200 bg-white px-3 py-1 gap-2 shrink-0">
+      <div className="lg:hidden flex border-b border-zinc-200 bg-white px-3 py-1 gap-2 shrink-0 dark:border-zinc-800 dark:bg-zinc-950">
         <button
           onClick={() => setMobileTab('copilot')}
           className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 text.xs font-medium rounded transition-colors ${
             mobileTab === 'copilot'
-              ? 'bg-zinc-900 text-white'
-              : 'text-zinc-600 hover:bg-zinc-100'
+              ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
+              : 'text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800'
           }`}
         >
           <Bot className="w-3.5 h-3.5" />
@@ -164,8 +171,8 @@ export const App: React.FC = () => {
           onClick={() => setMobileTab('composer')}
           className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 text.xs font-medium rounded transition-colors ${
             mobileTab === 'composer'
-              ? 'bg-zinc-900 text-white'
-              : 'text-zinc-600 hover:bg-zinc-100'
+              ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
+              : 'text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800'
           }`}
         >
           <Mail className="w-3.5 h-3.5" />
