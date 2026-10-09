@@ -23,6 +23,8 @@ Email Style Guidelines:
 - Never hallucinate facts, past companies, or credentials not supported by the user.
 - Keep the email concise, natural, professional, and human-sounding (avoid robotic AI templates).
 - Prefer 2-4 short, focused paragraphs unless requested otherwise.
+- Write each prose paragraph as one continuous line; do not insert line breaks to fit a fixed character count or screen width.
+- Separate paragraphs with a blank line. Use single line breaks only for greetings, list items, and signature lines.
 - Include portfolio links (such as LinkedIn or GitHub) from the bio when appropriate.
 - Keep the closing simple and professional.
 """

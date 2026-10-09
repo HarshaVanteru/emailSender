@@ -14,7 +14,7 @@
   }
 
   body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     color: #09090b;
     background-color: #ffffff;
     -webkit-font-smoothing: antialiased;
@@ -70,3 +70,128 @@
 [data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
   background: #71717a;
 }
+
+
+  .studio-shell {
+    --canvas: #f5f6fa;
+    --surface: #ffffff;
+    --soft: #f8f9fc;
+    --ink: #25293d;
+    --muted: #656b81;
+    --line: #e2e5ef;
+    --accent: #5851d8;
+    --accent-soft: #eeedff;
+    height: 100vh;
+    height: 100dvh;
+    width: 100%;
+    background: var(--canvas);
+    color: var(--ink);
+  }
+  .studio-shell[data-theme="dark"] {
+    --canvas: #11131d;
+    --surface: #1b1e2c;
+    --soft: #202435;
+    --ink: #eeeff8;
+    --muted: #a7adc5;
+    --line: #34394e;
+    --accent: #afa8ff;
+    --accent-soft: #302c50;
+  }
+  .studio-header { min-height: 76px; padding-inline: 32px; background: var(--surface); border-bottom: 1px solid var(--line); gap: 16px; }
+  .brand-mark { width: 38px; height: 38px; border-radius: 12px; background: #5851d8; color: white; box-shadow: 0 4px 12px #5851d82b; }
+  .brand-mark svg { width: 20px; height: 20px; }
+  .brand-name { color: var(--ink); font-size: 17px; font-weight: 700; letter-spacing: -.6px; white-space: nowrap; }
+  .brand-badge { background: var(--accent-soft); color: var(--accent); border-radius: 6px; padding: 4px 7px; font-size: 10px; font-weight: 600; }
+  .workspace-intro { padding: 29px 34px 25px; display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-shrink: 0; }
+  .eyebrow { font-size: 10px; font-weight: 700; letter-spacing: 1.8px; color: var(--accent); }
+  .workspace-intro h1 { font-family: "Space Grotesk", "Inter", sans-serif; font-size: clamp(22px, 1.6vw + 8px, 30px); font-weight: 600; letter-spacing: -1.1px; margin-block: 7px; }
+  .workspace-intro > div > p:last-child { color: var(--muted); font-size: 13px; line-height: 1.6; }
+  .workflow-note { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 12px; }
+  .workflow-note svg { color: var(--accent); }
+  .studio-workspace { min-height: 0; gap: 22px; margin: 0 32px 28px; }
+  .copilot-column, .composer-column { min-height: 0; }
+  .copilot-panel, .composer-panel { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; box-shadow: 0 4px 18px #20254a04; }
+  .panel-heading { min-height: 62px; padding-inline: 22px; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .panel-heading svg { color: var(--accent); }
+  .conversation { padding: 22px; min-height: 0; }
+  .copilot-welcome { padding-block: 12px; }
+  .welcome-icon { width: 52px; height: 52px; display: grid; place-items: center; border-radius: 16px; background: var(--accent-soft); color: var(--accent); margin-bottom: 18px; }
+  .copilot-welcome h2 { font-size: 21px; font-weight: 600; letter-spacing: -.65px; }
+  .copilot-welcome > p:not(.eyebrow) { color: var(--muted); font-size: 13px; line-height: 1.8; margin-top: 8px; }
+  .template-label { margin-top: 28px; margin-bottom: 10px; color: var(--muted); font-size: 9px; }
+  .prompt-card { width: 100%; display: flex; align-items: center; text-align: start; gap: 11px; padding: 13px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); transition: border-color .15s, background .15s; margin-bottom: 8px; }
+  .prompt-card:hover { background: var(--soft); border-color: var(--accent); }
+  .prompt-card > span:nth-child(2) { flex: 1; min-width: 0; }
+  .prompt-card strong { display: block; font-size: 11px; font-weight: 600; }
+  .prompt-card small { display: block; font-size: 10px; color: var(--muted); margin-top: 4px; line-height: 1.5; }
+  .prompt-icon { width: 32px; height: 34px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; flex-shrink: 0; }
+  .prompt-card > svg { color: var(--muted); flex-shrink: 0; }
+  .copilot-input { padding: 17px; border-top: 1px solid var(--line); background: var(--surface); }
+  .input-label { display: block; font-size: 11px; font-weight: 600; margin-bottom: 9px; }
+  .copilot-input > div { border-radius: 12px; background: var(--soft); border-color: var(--line); align-items: flex-end; }
+  .copilot-input textarea { padding: 12px; font-size: 13px; background: transparent; color: var(--ink); }
+  .copilot-input button { width: 32px; height: 32px; border-radius: 9px; background: #5851d8; color: white; }
+  .copilot-input button:disabled { background: var(--line); color: var(--muted); }
+  .input-hint { font-size: 9px; color: var(--muted); margin-top: 9px; display: flex; justify-content: space-between; gap: 8px; }
+  .composer-title { display: flex; align-items: center; justify-content: space-between; padding: 23px 27px 18px; gap: 10px; }
+  .composer-title .eyebrow { font-size: 9px; }
+  .composer-title h2 { font-size: 19px; letter-spacing: -.5px; font-weight: 600; margin-top: 5px; }
+  .draft-badge { display: inline-flex; align-items: center; gap: 7px; font-size: 10px; color: var(--muted); background: var(--soft); padding: 7px 10px; border-radius: 20px; white-space: nowrap; }
+  .draft-badge > span { width: 5px; height: 5px; border-radius: 50%; background: #48a987; }
+  .composer-form { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+  .composer-toolbar { min-height: 49px; padding-inline: 24px; border-block: 1px solid var(--line); background: var(--soft); gap: 8px; }
+  .composer-toolbar button { min-height: 30px; font-size: 11px; }
+  .composer-toolbar button[aria-pressed="true"] { color: var(--accent); background: var(--surface); box-shadow: 0 1px 4px #171b3420; }
+  .writing-canvas { background: var(--soft); padding: 26px; }
+  .recipient-email-preview { width: 100%; min-width: 0; min-height: 220px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; word-wrap: break-word; }
+  .recipient-email-preview p { margin: 0 0 16px; white-space: pre-line; }
+  .email-paper { max-width: 850px; margin-inline: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 20px 26px; min-height: 100%; }
+  .field-label { width: 64px; flex-shrink: 0; color: var(--muted); font-size: 12px; }
+  .email-paper input { min-width: 0; min-height: 38px; font-size: 14px; background: transparent; color: var(--ink); }
+  .email-paper textarea { font-size: 14px; line-height: 1.9; min-height: 230px; resize: vertical; color: var(--ink); }
+  .email-paper :is(input, textarea)::placeholder { color: var(--muted); opacity: .8; }
+  .composer-footer { min-height: 72px; padding: 13px 25px; border-top: 1px solid var(--line); gap: 12px; }
+  .composer-footer button[type="submit"] { min-height: 40px; padding-inline: 19px; background: #5851d8; color: white; font-size: 12px; border-radius: 9px; }
+  .composer-footer button[type="submit"]:disabled { background: var(--line); color: var(--muted); }
+  .connection-hint { font-size: 11px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; text-decoration: underline; text-underline-offset: 3px; }
+  .studio-shell :is(button, a, input, textarea):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  .studio-shell :is(input, textarea):user-invalid { outline: 2px solid #e0596b; outline-offset: 3px; }
+  .studio-shell button:not(:disabled), .studio-shell a { cursor: pointer; }
+  .studio-shell ::selection { background: #dcd9ff; color: #27224d; }
+  .settings-dialog { margin: auto; border: 1px solid var(--line); padding: 0; border-radius: 16px; width: min(540px, calc(100% - 32px)); max-height: 90dvh; background: var(--surface); color: var(--ink); box-shadow: 0 24px 80px #0004; }
+  .settings-dialog::backdrop { background: #10132999; }
+  .settings-dialog > div { max-width: none; border-radius: 16px; }
+  @media (max-width: 1100px) { .workflow-note { display: none; } }
+  @media (max-width: 1023px) {
+    .studio-header { min-height: 66px; padding-inline: 18px; }
+    .workspace-intro { padding: 22px 20px 18px; }
+    .workspace-intro h1 { font-size: 24px; }
+    .studio-workspace { margin: 14px 16px 16px; }
+    .studio-shell > div.lg\:hidden { background: var(--canvas); border: 0; padding-inline: 16px; }
+    .studio-shell > div.lg\:hidden button { min-height: 42px; border-radius: 9px; font-size: 13px; }
+    .copilot-welcome { max-width: 520px; margin-inline: auto; }
+    .writing-canvas { padding: 16px; }
+    .email-paper { padding: 18px; }
+    .studio-shell :is(input, textarea) { font-size: 16px; }
+    .studio-header button { min-width: 40px; min-height: 40px; }
+  }
+  @media (max-width: 480px) {
+    .brand-name { font-size: 15px; }
+    .studio-header { padding-inline: 12px; gap: 8px; }
+    .studio-header .font-mono { max-width: 60px; }
+    .studio-header > div:first-child { flex-shrink: 0; gap: 8px; }
+    .studio-header > div:last-child { gap: 4px; }
+    .studio-header > div:last-child > div { gap: 4px; }
+    .workspace-intro { padding: 18px 18px 14px; }
+    .workspace-intro h1 { font-size: 22px; max-width: 280px; }
+    .workspace-intro > div > p:last-child { font-size: 12px; }
+    .composer-title { padding: 17px; }
+    .composer-toolbar { padding-inline: 12px; }
+    .draft-badge { font-size: 9px; padding-inline: 8px; }
+    .composer-footer { padding-inline: 14px; flex-wrap: wrap; }
+    .composer-footer > div:last-child { margin-inline-start: auto; }
+    .connection-hint { font-size: 10px; }
+    .conversation { padding: 18px; }
+  }
+  @media (pointer: coarse) { .studio-shell button, .studio-shell a { min-height: 48px; } }
+  @media (prefers-reduced-motion: reduce) { .studio-shell *, .studio-shell *::before, .studio-shell *::after { animation: none; transition: none; scroll-behavior: auto; } }

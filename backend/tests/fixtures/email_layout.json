@@ -1,0 +1,33 @@
+[
+  {
+    "name": "wrapped prose and signature",
+    "input": "Dear Venugopal,\n\nI am writing to express my interest in\nthe AI Engineer role. I have experience\nbuilding useful applications.\n\nBest regards,\nHarsha\nAI Engineer",
+    "expected": "Dear Venugopal,\n\nI am writing to express my interest in the AI Engineer role. I have experience building useful applications.\n\nBest regards,\nHarsha\nAI Engineer"
+  },
+  {
+    "name": "list continuation wraps",
+    "input": "My projects:\n- SQL Agent: a natural-language interface\nfor database queries.\n- RAG: answers questions\nfrom documents.\n\nThanks,\nHarsha",
+    "expected": "My projects:\n- SQL Agent: a natural-language interface for database queries.\n- RAG: answers questions from documents.\n\nThanks,\nHarsha"
+  },
+  {
+    "name": "greeting without blank line and Windows line endings",
+    "input": "Hello Alex,\r\nHere is a project\r\nupdate.\r\n \r\nCheers,\r\nSam",
+    "expected": "Hello Alex,\nHere is a project update.\n\nCheers,\nSam"
+  },
+  {
+    "name": "numbered lists and non-Latin text",
+    "input": "1. First item\ncontinued here\n2. Second item\n\nనమస్కారం, ప్రపంచం!",
+    "expected": "1. First item continued here\n2. Second item\n\nనమస్కారం, ప్రపంచం!"
+  },
+  {
+    "name": "wording and markup remain unchanged",
+    "input": "My **SQL Agent** uses C++. Contact a_b@example.com.\n\n<script>alert('test')</script> & details",
+    "expected": "My **SQL Agent** uses C++. Contact a_b@example.com.\n\n<script>alert('test')</script> & details"
+  },
+  {
+    "name": "closing without a blank line",
+    "input": "Here is the\nupdate.\nBest regards,\nSam\nEngineer",
+    "expected": "Here is the update.\nBest regards,\nSam\nEngineer"
+  },
+  { "name": "empty message", "input": "", "expected": "" }
+]

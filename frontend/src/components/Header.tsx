@@ -14,16 +14,15 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({ profile, checkingAuth, onRefreshAuth, onOpenSettings, isDarkMode, onToggleTheme }) => {
   return (
-    <header className="h-11 border-b border-zinc-200 bg-white px-4 flex items-center justify-between shrink-0 select-none dark:border-zinc-800 dark:bg-zinc-950">
+    <header className="studio-header flex items-center justify-between shrink-0 select-none">
       {/* Brand & Breadcrumb */}
       <div className="flex items-center gap-2.5">
-        <div className="w-6 h-6 rounded-md bg-zinc-900 text-white flex items-center justify-center dark:bg-zinc-100 dark:text-zinc-900">
+        <div className="brand-mark flex items-center justify-center">
           <Mail className="w-3.5 h-3.5" />
         </div>
         <div className="flex items-center gap-2 text-xs">
-          <span className="font-semibold text-zinc-900 tracking-tight dark:text-zinc-100">Email Studio</span>
-          <span className="text-zinc-300 dark:text-zinc-700">/</span>
-          <span className="text-zinc-500 font-mono text-[11px] dark:text-zinc-400">v1.0</span>
+          <span className="brand-name">Email Studio</span>
+          <span className="brand-badge hidden sm:inline">AI-powered</span>
         </div>
       </div>
 
@@ -53,6 +52,7 @@ export const Header: React.FC<HeaderProps> = ({ profile, checkingAuth, onRefresh
               <button
                 onClick={onRefreshAuth}
                 title="Refresh connection"
+                aria-label="Refresh Gmail connection"
                 className="text-zinc-400 hover:text-zinc-700 p-0.5 rounded cursor-pointer transition-colors dark:hover:text-zinc-200"
               >
                 <RefreshCw className="w-3 h-3" />
@@ -62,6 +62,7 @@ export const Header: React.FC<HeaderProps> = ({ profile, checkingAuth, onRefresh
               <button 
                 onClick={onOpenSettings}
                 title="Profile Settings"
+                aria-label="Open profile settings"
                 className="text-zinc-500 hover:text-zinc-900 bg-zinc-50 border border-zinc-200 p-1.5 rounded-md cursor-pointer transition-colors dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
               >
                 <Settings className="w-3.5 h-3.5" />
@@ -78,7 +79,7 @@ export const Header: React.FC<HeaderProps> = ({ profile, checkingAuth, onRefresh
               href={getGmailAuthUrl()}
               className="inline-flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-medium px-2.5 py-1 rounded-md transition-all cursor-pointer shadow-2xs dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
             >
-              <span>Connect</span>
+              <span>Connect Gmail</span>
               <ExternalLink className="w-3 h-3" />
             </a>
           </div>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { updateProfile } from '../api';
 import type { GmailProfile } from '../types';
 import { X, Check } from 'lucide-react';
@@ -16,9 +16,17 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onClo
   const [preferences, setPreferences] = useState(profile?.preferences || '');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState('');
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    dialog?.showModal();
+    return () => dialog?.close();
+  }, []);
 
   const handleSave = async () => {
     setSaving(true);
+    setError('');
     try {
       await updateProfile({ name, bio, signature, preferences });
       setSaved(true);
@@ -26,29 +34,30 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onClo
       setTimeout(() => setSaved(false), 2000);
     } catch (e) {
       console.error(e);
-      alert('Failed to save profile');
+      setError('Your settings could not be saved. Please try again.');
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+    <dialog ref={dialogRef} onCancel={onClose} aria-labelledby="settings-title" className="settings-dialog">
       <div className="bg-white rounded-lg shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh] dark:bg-zinc-900">
         <div className="px-5 py-3.5 border-b border-zinc-200 flex justify-between items-center bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950">
           <div>
-            <h2 className="font-semibold text-zinc-900 text-sm dark:text-zinc-100">Settings & AI Profile</h2>
+            <h2 id="settings-title" className="font-semibold text-zinc-900 text-sm dark:text-zinc-100">Make your emails sound like you</h2>
             <p className="text-[11px] text-zinc-500">Configure your personal context and AI email preferences</p>
           </div>
-          <button onClick={onClose} className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200">
+          <button aria-label="Close settings" onClick={onClose} className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200">
             <X className="w-4 h-4" />
           </button>
         </div>
         
         <div className="p-5 space-y-4 flex-1 overflow-y-auto">
           <div>
-            <label className="block text-xs font-medium text-zinc-700 mb-1 dark:text-zinc-300">Connected Email</label>
+            <label htmlFor="profile-email" className="block text-xs font-medium text-zinc-700 mb-1 dark:text-zinc-300">Connected Email</label>
             <input 
+              id="profile-email"
               type="text" 
               value={profile?.email || ''} 
               disabled 
@@ -57,8 +66,10 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onClo
           </div>
           
           <div>
-            <label className="block text-xs font-medium text-zinc-700 mb-1 dark:text-zinc-300">Display Name</label>
+            <label htmlFor="profile-name" className="block text-xs font-medium text-zinc-700 mb-1 dark:text-zinc-300">Display Name</label>
             <input 
+              id="profile-name"
+              autoComplete="name"
               type="text" 
               value={name} 
               onChange={e => setName(e.target.value)}
@@ -69,10 +80,11 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onClo
 
           <div>
             <div className="flex justify-between items-baseline mb-1">
-              <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">Bio & Background Context</label>
+              <label htmlFor="profile-bio" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">Bio & Background Context</label>
               <span className="text-[10px] text-zinc-400 font-medium text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded dark:bg-emerald-950 dark:text-emerald-300">AI Context Tool</span>
             </div>
             <textarea 
+              id="profile-bio"
               value={bio} 
               onChange={e => setBio(e.target.value)}
               placeholder="e.g. Full-stack engineer with 4+ years of experience in Python, FastAPI, React, and GenAI systems. Graduated from XYZ University with honors..."
@@ -85,8 +97,9 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onClo
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-zinc-700 mb-1 dark:text-zinc-300">AI Writing Preferences</label>
+            <label htmlFor="profile-preferences" className="block text-xs font-medium text-zinc-700 mb-1 dark:text-zinc-300">AI Writing Preferences</label>
             <textarea 
+              id="profile-preferences"
               value={preferences} 
               onChange={e => setPreferences(e.target.value)}
               placeholder="e.g. Always be polite and direct. Keep emails under 120 words. No buzzwords."
@@ -99,8 +112,9 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onClo
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-zinc-700 mb-1 dark:text-zinc-300">Email Signature</label>
+            <label htmlFor="profile-signature" className="block text-xs font-medium text-zinc-700 mb-1 dark:text-zinc-300">Email Signature</label>
             <textarea 
+              id="profile-signature"
               value={signature} 
               onChange={e => setSignature(e.target.value)}
               placeholder="Best regards,\nHarsha Vanteru"
@@ -110,6 +124,8 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onClo
           </div>
         </div>
 
+        {error && <p role="alert" className="px-5 py-2 text-sm text-rose-600">{error}</p>}
+        {saved && <p role="status" className="px-5 py-2 text-sm text-emerald-600">Your writing preferences have been saved.</p>}
         <div className="px-5 py-3 border-t border-zinc-200 bg-zinc-50 flex justify-end gap-2 dark:border-zinc-800 dark:bg-zinc-950">
           <button 
             onClick={onClose}
@@ -126,6 +142,6 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onClo
           </button>
         </div>
       </div>
-    </div>
+    </dialog>
   );
 };

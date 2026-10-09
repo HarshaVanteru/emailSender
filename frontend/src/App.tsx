@@ -4,7 +4,7 @@ import { AiCopilot } from './components/AiCopilot';
 import { EmailComposer } from './components/EmailComposer';
 import type { ChatMessage, GeneratedEmail, GmailProfile } from './types';
 import { fetchGmailProfile, generateEmailDraft, setToken } from './api';
-import { Bot, Mail } from 'lucide-react';
+import { Bot, Mail, Sparkles } from 'lucide-react';
 import { ProfileSettings } from './components/ProfileSettings';
 
 const INITIAL_DRAFT: GeneratedEmail = {
@@ -24,9 +24,14 @@ export const App: React.FC = () => {
   const [isDarkMode, setIsDarkMode] = useState(() => window.localStorage.getItem('email-studio-theme') === 'dark');
 
   const checkAuth = async () => {
-    setCheckingAuth(true);
-    
-    // Check for token in URL
+    const res = await fetchGmailProfile();
+    setProfile(res);
+    setCheckingAuth(false);
+  };
+
+  useEffect(() => {
+    let active = true;
+    // Read the OAuth callback once before checking the account.
     const urlParams = new URLSearchParams(window.location.search);
     const token = urlParams.get('token');
     if (token) {
@@ -35,13 +40,13 @@ export const App: React.FC = () => {
       window.history.replaceState({}, document.title, window.location.pathname);
     }
 
-    const res = await fetchGmailProfile();
-    setProfile(res);
-    setCheckingAuth(false);
-  };
-
-  useEffect(() => {
-    checkAuth();
+    void fetchGmailProfile().then((res) => {
+      if (active) {
+        setProfile(res);
+        setCheckingAuth(false);
+      }
+    });
+    return () => { active = false; };
   }, []);
 
   const handleGenerate = async (instruction: string) => {
@@ -132,11 +137,11 @@ export const App: React.FC = () => {
   const hasActiveDraft = Boolean(draft.to || draft.subject || draft.body);
 
   return (
-    <div data-theme={isDarkMode ? 'dark' : 'light'} className="h-screen w-screen flex flex-col bg-white overflow-hidden text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
+    <div data-theme={isDarkMode ? 'dark' : 'light'} className="studio-shell flex flex-col overflow-hidden">
       <Header
         profile={profile}
         checkingAuth={checkingAuth}
-        onRefreshAuth={checkAuth}
+        onRefreshAuth={() => { setCheckingAuth(true); void checkAuth(); }}
         onOpenSettings={() => setShowSettings(true)}
         isDarkMode={isDarkMode}
         onToggleTheme={() => {
@@ -150,14 +155,19 @@ export const App: React.FC = () => {
         <ProfileSettings 
           profile={profile} 
           onClose={() => setShowSettings(false)} 
-          onUpdate={checkAuth} 
+          onUpdate={() => { void checkAuth(); }}
         />
       )}
 
+      <section className="workspace-intro">
+        <div><p className="eyebrow">YOUR WRITING WORKSPACE</p><h1>A little less effort. A better email.</h1><p>Turn a thought into a thoughtful message. Draft, refine, and send in one place.</p></div>
+        <div className="workflow-note"><Sparkles aria-hidden="true" size={16} /><span>Describe it. Make it yours. Send it.</span></div>
+      </section>
       {/* Mobile Tab Toggle */}
       <div className="lg:hidden flex border-b border-zinc-200 bg-white px-3 py-1 gap-2 shrink-0 dark:border-zinc-800 dark:bg-zinc-950">
         <button
           onClick={() => setMobileTab('copilot')}
+          aria-pressed={mobileTab === 'copilot'}
           className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 text.xs font-medium rounded transition-colors ${
             mobileTab === 'copilot'
               ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
@@ -169,6 +179,7 @@ export const App: React.FC = () => {
         </button>
         <button
           onClick={() => setMobileTab('composer')}
+          aria-pressed={mobileTab === 'composer'}
           className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 text.xs font-medium rounded transition-colors ${
             mobileTab === 'composer'
               ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
@@ -176,15 +187,15 @@ export const App: React.FC = () => {
           }`}
         >
           <Mail className="w-3.5 h-3.5" />
-          <span>Composer {hasActiveDraft && ' '}</span>
+          <span>Composer {hasActiveDraft && '•'}</span>
         </button>
       </div>
 
       {/* Edge-to-Edge Studio Workspace */}
-      <main className="flex-1 flex overflow-hidden">
+      <main className="studio-workspace flex-1 flex overflow-hidden">
         {/* Left Column: AI Copilot */}
         <div
-          className={`w-full lg:w-[350px] xl:w-[380px] shrink-0 h-full ${
+          className={`copilot-column w-full lg:w-[350px] xl:w-[380px] shrink-0 h-full ${
             mobileTab === 'copilot' ? 'block' : 'hidden lg:block'
           }`}
         >
@@ -200,7 +211,7 @@ export const App: React.FC = () => {
 
         {/* Right Column: Email Composer */}
         <div
-          className={`flex-1 h-full min-w-0 ${
+          className={`composer-column flex-1 h-full min-w-0 ${
             mobileTab === 'composer' ? 'block' : 'hidden lg:block'
           }`}
         >

@@ -3,6 +3,8 @@ import json
 from email.message import EmailMessage
 from mimetypes import guess_type
 
+from app.services.email_layout import reflow_email_body, render_email_html
+
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
@@ -61,7 +63,8 @@ class GmailService:
         message = EmailMessage()
         message["To"] = to
         message["Subject"] = subject
-        message.set_content(body)
+        message.set_content(reflow_email_body(body))
+        message.add_alternative(render_email_html(body), subtype="html")
 
         if attachment:
             content_type = attachment.get("content_type") or (

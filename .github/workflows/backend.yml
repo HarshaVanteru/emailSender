@@ -123,7 +123,7 @@ jobs:
           set -euo pipefail
 
           for _ in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:4999/api/health >/dev/null; then
+            if curl -fsS http://127.0.0.1:8000/api/health >/dev/null; then
               echo "API is ready"
               exit 0
             fi
@@ -132,7 +132,7 @@ jobs:
 
           echo "The API was not ready within 60 seconds" >&2
           curl -sS -o /dev/null -w 'Last /api/health status: %{http_code}\n' \
-            http://127.0.0.1:4999/api/health || true
+            http://127.0.0.1:8000/api/health || true
 
           cd "$DEPLOY_DIR"
           docker compose logs --tail=80 "$SERVICE_NAME"
