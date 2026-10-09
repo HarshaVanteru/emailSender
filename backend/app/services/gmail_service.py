@@ -8,6 +8,8 @@ from app.services.email_layout import reflow_email_body, render_email_html
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
+from google_auth_httplib2 import AuthorizedHttp
+import httplib2
 
 from app.core.config import (
     GMAIL_SCOPES,
@@ -18,7 +20,7 @@ from app.core.config import (
 
 
 class GmailService:
-    def create_google_flow(self) -> Flow:
+    def create_google_flow(self, scopes=None) -> Flow:
         client_config = {
             "web": {
                 "client_id": GOOGLE_CLIENT_ID,
@@ -30,9 +32,24 @@ class GmailService:
         }
         return Flow.from_client_config(
             client_config,
-            scopes=GMAIL_SCOPES,
+            scopes=scopes or GMAIL_SCOPES,
             redirect_uri=GOOGLE_REDIRECT_URI,
         )
+
+    def exchange_google_code(self, flow: Flow, code: str):
+        def record_granted_scopes(response):
+            # Incremental/granular consent can return a superset or subset of
+            # requested scopes. Track the actual grant on this session only;
+            # each mailbox operation still checks its required permissions.
+            granted = response.json().get("scope")
+            if granted is not None:
+                if not isinstance(granted, str) or not granted.strip():
+                    raise ValueError("Invalid granted scope response")
+                flow.oauth2session.scope = granted.split()
+            return response
+        flow.oauth2session.register_compliance_hook("access_token_response", record_granted_scopes)
+        flow.fetch_token(code=code, timeout=15)
+        return flow.credentials
 
     def get_gmail_service(self, google_token: str):
         if not google_token:
@@ -40,16 +57,12 @@ class GmailService:
                 "Gmail credentials not provided. Please authenticate via /api/gmail/auth first."
             )
 
-        token_data = json.loads(google_token)
-        credentials = Credentials(
-            token=token_data["token"],
-            refresh_token=token_data.get("refresh_token"),
-            token_uri=token_data["token_uri"],
-            client_id=token_data["client_id"],
-            client_secret=token_data["client_secret"],
-            scopes=token_data.get("scopes"),
-        )
-        return build("gmail", "v1", credentials=credentials)
+        data = json.loads(google_token)
+        # Returning OAuth grants can omit refresh_token. Their fresh access token
+        # is sufficient for profile verification before the stored token is merged.
+        data.setdefault("refresh_token", None)
+        credentials = Credentials.from_authorized_user_info(data)
+        return build("gmail", "v1", http=AuthorizedHttp(credentials, http=httplib2.Http(timeout=30)))
 
     def send_email(
         self,

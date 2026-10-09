@@ -21,6 +21,8 @@ export const App: React.FC = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [mobileTab, setMobileTab] = useState<'copilot' | 'composer'>('copilot');
   const [showSettings, setShowSettings] = useState(false);
+  const [authNotice] = useState(() => new URLSearchParams(window.location.hash.slice(1)).get('auth') === 'cancelled'
+    ? 'Gmail connection was cancelled. You can connect again when you’re ready.' : '');
   const [isDarkMode, setIsDarkMode] = useState(() => window.localStorage.getItem('email-studio-theme') === 'dark');
 
   const checkAuth = async () => {
@@ -33,12 +35,13 @@ export const App: React.FC = () => {
     let active = true;
     // Read the OAuth callback once before checking the account.
     const urlParams = new URLSearchParams(window.location.search);
-    const token = urlParams.get('token');
+    const fragment = new URLSearchParams(window.location.hash.slice(1));
+    const token = fragment.get('token') || urlParams.get('token');
     if (token) {
       setToken(token);
       // clean up URL
-      window.history.replaceState({}, document.title, window.location.pathname);
     }
+    if (token || fragment.has('auth')) window.history.replaceState({}, document.title, window.location.pathname);
 
     void fetchGmailProfile().then((res) => {
       if (active) {
@@ -151,6 +154,8 @@ export const App: React.FC = () => {
         }}
       />
 
+      {authNotice && <p role="status" className="px-5 py-2 text-sm text-amber-700">{authNotice}</p>}
+
       {showSettings && (
         <ProfileSettings 
           profile={profile} 
@@ -220,7 +225,7 @@ export const App: React.FC = () => {
             onChangeDraft={handleUpdateDraft}
             onResetDraft={handleResetDraft}
             onSentSuccess={handleSentSuccess}
-            isGmailConnected={Boolean(profile?.email)}
+            isGmailConnected={Boolean(profile?.is_connected)}
           />
         </div>
       </main>

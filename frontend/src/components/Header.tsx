@@ -45,10 +45,11 @@ export const Header: React.FC<HeaderProps> = ({ profile, checkingAuth, onRefresh
         ) : profile?.email ? (
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-2 bg-zinc-50 border border-zinc-200 text-zinc-700 text-[11px] px-2.5 py-1 rounded-md dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-              <span className="font-mono max-w-[200px] truncate" title={profile.email}>
+              <span aria-hidden="true" className={`w-1.5 h-1.5 rounded-full ${profile.is_connected ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
+              <span className="font-mono max-w-[110px] sm:max-w-[200px] truncate" title={profile.email}>
                 {profile.email}
               </span>
+              <span className="sr-only">{profile.is_connected ? 'Gmail connected' : 'Gmail disconnected'}</span>
               <button
                 onClick={onRefreshAuth}
                 title="Refresh connection"
@@ -58,6 +59,7 @@ export const Header: React.FC<HeaderProps> = ({ profile, checkingAuth, onRefresh
                 <RefreshCw className="w-3 h-3" />
               </button>
             </div>
+            {!profile.is_connected && <a href={getGmailAuthUrl(true)} className="text-xs text-indigo-600 font-medium">Reconnect</a>}
             {onOpenSettings && (
               <button 
                 onClick={onOpenSettings}

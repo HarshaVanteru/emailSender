@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { updateProfile } from '../api';
-import type { GmailProfile } from '../types';
+import { disconnectAccount, fetchConnectedAccounts, getGmailAuthUrl, updateProfile } from '../api';
+import type { ConnectedAccount, GmailProfile } from '../types';
 import { X, Check } from 'lucide-react';
 
 interface ProfileSettingsProps {
@@ -17,12 +17,41 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onClo
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
+  const [accounts, setAccounts] = useState<ConnectedAccount[]>([]);
+  const [loadingAccounts, setLoadingAccounts] = useState(true);
+  const [connectionError, setConnectionError] = useState('');
+  const [confirmDisconnect, setConfirmDisconnect] = useState<number | null>(null);
+  const [disconnecting, setDisconnecting] = useState(false);
   const dialogRef = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const dialog = dialogRef.current;
     dialog?.showModal();
     return () => dialog?.close();
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    void fetchConnectedAccounts().then((data) => { if (active) setAccounts(data); })
+      .catch((error: unknown) => { if (active) setConnectionError(error instanceof Error ? error.message : 'Could not load connections.'); })
+      .finally(() => { if (active) setLoadingAccounts(false); });
+    return () => { active = false; };
+  }, []);
+
+  const handleDisconnect = async (accountId: number) => {
+    setDisconnecting(true);
+    setConnectionError('');
+    try {
+      await disconnectAccount(accountId);
+      setAccounts((previous) => previous.map((account) => account.id === accountId
+        ? { ...account, is_connected: false, requires_reauth: false } : account));
+      setConfirmDisconnect(null);
+      onUpdate();
+    } catch (error: unknown) {
+      setConnectionError(error instanceof Error ? error.message : 'Could not disconnect Gmail.');
+    } finally {
+      setDisconnecting(false);
+    }
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -55,7 +84,7 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onClo
         
         <div className="p-5 space-y-4 flex-1 overflow-y-auto">
           <div>
-            <label htmlFor="profile-email" className="block text-xs font-medium text-zinc-700 mb-1 dark:text-zinc-300">Connected Email</label>
+            <label htmlFor="profile-email" className="block text-xs font-medium text-zinc-700 mb-1 dark:text-zinc-300">Your account</label>
             <input 
               id="profile-email"
               type="text" 
@@ -64,6 +93,32 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onClo
               className="w-full text-xs font-mono border border-zinc-200 rounded px-3 py-2 bg-zinc-100 text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-400" 
             />
           </div>
+
+          <section aria-labelledby="gmail-connections-title" className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-700">
+            <h3 id="gmail-connections-title" className="text-sm font-medium">Gmail connection</h3>
+            {loadingAccounts && <p role="status" className="mt-2 text-xs text-zinc-500">Loading connection…</p>}
+            {connectionError && <p role="alert" className="mt-2 text-xs text-rose-600">{connectionError}</p>}
+            {!loadingAccounts && accounts.map((account) => (
+              <div key={account.id} className="mt-2 space-y-2">
+                <p className="text-xs break-all">{account.email}</p>
+                <p role="status" className="text-xs text-zinc-500">{account.is_connected ? 'Connected · Ready to send' : account.requires_reauth ? 'Access expired · Reconnect to send' : 'Disconnected'}</p>
+                {(account.is_connected || account.requires_reauth) && confirmDisconnect !== account.id && (
+                  <button type="button" onClick={() => setConfirmDisconnect(account.id)} className="text-xs font-medium text-rose-600">Disconnect Gmail</button>
+                )}
+                {confirmDisconnect === account.id && (
+                  <div className="space-y-2 rounded bg-rose-50 p-3 dark:bg-rose-950">
+                    <p className="text-xs">Disconnect {account.email}? This revokes Email Studio’s Google access. Your email and writing preferences stay saved.</p>
+                    <div className="flex gap-3">
+                      <button type="button" disabled={disconnecting} onClick={() => void handleDisconnect(account.id)} className="text-xs font-medium text-rose-700 disabled:opacity-50">{disconnecting ? 'Disconnecting…' : 'Confirm disconnect'}</button>
+                      <button type="button" disabled={disconnecting} onClick={() => setConfirmDisconnect(null)} className="text-xs font-medium">Keep connected</button>
+                    </div>
+                  </div>
+                )}
+                {!account.is_connected && <a href={getGmailAuthUrl(true)} className="inline-block text-xs font-medium text-indigo-600">Reconnect Gmail</a>}
+              </div>
+            ))}
+            {!loadingAccounts && !connectionError && accounts.length === 0 && <a href={getGmailAuthUrl()} className="inline-block mt-2 text-xs text-indigo-600">Connect Gmail</a>}
+          </section>
           
           <div>
             <label htmlFor="profile-name" className="block text-xs font-medium text-zinc-700 mb-1 dark:text-zinc-300">Display Name</label>

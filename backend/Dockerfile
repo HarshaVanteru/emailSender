@@ -16,6 +16,8 @@ RUN python -c "f = 'requirements.txt'; b = open(f, 'rb').read(); open(f, 'wb').w
 
 # Copy application source
 COPY app ./app
+COPY alembic.ini ./alembic.ini
+COPY migrations ./migrations
 
 # Create and switch to non-root user for security
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app

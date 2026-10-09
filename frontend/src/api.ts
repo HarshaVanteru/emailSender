@@ -1,6 +1,8 @@
-import type { ChatMessage, CopilotResponse, SendEmailPayload, SendEmailResponse, GmailProfile } from './types';
+import type { ChatMessage, CopilotResponse, SendEmailPayload, SendEmailResponse, GmailProfile, ConnectedAccount } from './types';
+import { buildApiUrl } from './apiUrl';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
+const apiUrl = (path: string) => buildApiUrl(API_BASE, path);
 
 export function getToken(): string | null {
   return localStorage.getItem('access_token');
@@ -21,7 +23,7 @@ function getAuthHeaders(): Record<string, string> {
 
 export async function fetchGmailProfile(): Promise<GmailProfile | null> {
   try {
-    const res = await fetch(`${API_BASE}/api/gmail/profile`, {
+    const res = await fetch(apiUrl('gmail/profile'), {
       headers: {
         ...getAuthHeaders()
       }
@@ -37,7 +39,7 @@ export async function fetchGmailProfile(): Promise<GmailProfile | null> {
 }
 
 export async function updateProfile(data: { name?: string; signature?: string; preferences?: string; bio?: string }): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/gmail/profile`, {
+  const res = await fetch(apiUrl('gmail/profile'), {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
@@ -50,16 +52,31 @@ export async function updateProfile(data: { name?: string; signature?: string; p
   }
 }
 
-export function getGmailAuthUrl(): string {
-  const base = API_BASE ? API_BASE : 'http://127.0.0.1:8000';
-  return `${base}/api/gmail/auth`;
+export function getGmailAuthUrl(renewConsent = false): string {
+  return apiUrl('auth/google') + (renewConsent ? '?renew_consent=true' : '');
+}
+
+export async function fetchConnectedAccounts(): Promise<ConnectedAccount[]> {
+  const response = await fetch(apiUrl('accounts'), { headers: getAuthHeaders() });
+  if (!response.ok) throw new Error('Could not load Gmail connections. Please try again.');
+  return response.json();
+}
+
+export async function disconnectAccount(accountId: number): Promise<void> {
+  const response = await fetch(apiUrl(`accounts/${accountId}`), {
+    method: 'DELETE', headers: getAuthHeaders(),
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.detail || 'Could not disconnect Gmail. Please try again.');
+  }
 }
 
 export async function generateEmailDraft(
   instruction: string,
   history: ChatMessage[] = []
 ): Promise<CopilotResponse> {
-  const res = await fetch(`${API_BASE}/api/ai/generate-email`, {
+  const res = await fetch(apiUrl('ai/generate-email'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -80,7 +97,7 @@ export async function generateEmailDraft(
 }
 
 export async function sendEmail(payload: SendEmailPayload): Promise<SendEmailResponse> {
-  const res = await fetch(`${API_BASE}/api/gmail/send`, {
+  const res = await fetch(apiUrl('gmail/send'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

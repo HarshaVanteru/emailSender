@@ -1,102 +1,137 @@
-from fastapi import APIRouter, Depends, HTTPException
+import base64
+import hashlib
+from urllib.parse import urlencode, urlsplit
+
+import requests
+from cryptography.fernet import InvalidToken
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
-from app.core.config import FRONTEND_URL
+from app.core.config import FRONTEND_URL, GMAIL_READ_SCOPE, GMAIL_SCOPES, GOOGLE_REDIRECT_URI, OAUTH_STATE_TTL_SECONDS
 from app.core.database import get_db
 from app.core.security import create_access_token, get_current_user
 from app.models.user import User
 from app.repositories.user_repository import user_repository
 from app.schemas.gmail import SendEmailRequest, ProfileUpdateRequest
 from app.services.gmail_service import gmail_service
-import requests
-router = APIRouter(prefix="/api/gmail", tags=["gmail"])
+from app.models.connection import ConnectedAccount
+from app.services import account_service, oauth_state
+router = APIRouter(prefix="/gmail", tags=["gmail"])
+auth_router = APIRouter(prefix="/auth", tags=["auth"])
 
-oauth_state = {}
+accounts_router = APIRouter(prefix="/accounts", tags=["accounts"])
 
 @router.get("/auth")
-def gmail_auth(user_email: str | None = None):
-    flow = gmail_service.create_google_flow()
-
-    auth_url, state = flow.authorization_url(
+@auth_router.get("/google")
+def gmail_auth(renew_consent: bool = False, mailbox_access: bool = False, db: Session = Depends(get_db)):
+    scopes = [*GMAIL_SCOPES, GMAIL_READ_SCOPE] if mailbox_access else GMAIL_SCOPES
+    try:
+        state, browser, verifier = oauth_state.create_attempt(db, scopes)
+    except (ValueError, TypeError):
+        raise HTTPException(503, "Configure the server's token encryption key before connecting Gmail.") from None
+    flow = gmail_service.create_google_flow(scopes=scopes)
+    flow.code_verifier = verifier
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
+    options = {"prompt": "consent"} if renew_consent else {}
+    auth_url, _ = flow.authorization_url(
+        state=state, code_challenge=challenge, code_challenge_method="S256",
         access_type="offline",
-        include_granted_scopes="true"
+        include_granted_scopes="true", **options,
     )
-
-    # Store the state, user email, and PKCE code verifier
-    oauth_state[state] = {
-        "user_email": user_email,
-        "code_verifier": flow.code_verifier,
-    }
-
-    return RedirectResponse(url=auth_url)
+    response = RedirectResponse(url=auth_url)
+    response.set_cookie(oauth_state.cookie_name(state), browser, max_age=OAUTH_STATE_TTL_SECONDS,
+                        httponly=True, secure=urlsplit(GOOGLE_REDIRECT_URI or "").scheme == "https",
+                        samesite="lax", path="/api")
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
 
 
 @router.get("/auth/google/callback")
+@auth_router.get("/google/callback")
 def gmail_auth_callback(
-    code: str,
+    request: Request,
     state: str,
+    code: str | None = None,
+    error: str | None = None,
     db: Session = Depends(get_db)
 ):
-    # Get and remove the stored OAuth state
-    oauth_data = oauth_state.pop(state, None)
-
-    if not oauth_data:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid or expired OAuth state"
-        )
-
-    # Create the same OAuth flow
-    flow = gmail_service.create_google_flow()
-
-    # Restore the PKCE code verifier
-    flow.code_verifier = oauth_data["code_verifier"]
-
-    # Exchange authorization code for tokens
-    flow.fetch_token(code=code)
-
-    credentials = flow.credentials
-
-    service = gmail_service.get_gmail_service(
-        credentials.to_json()
-    )
-
-    user_info = requests.get(
-        "https://openidconnect.googleapis.com/v1/userinfo",
-        headers={
-            "Authorization": f"Bearer {credentials.token}"
-        }
-    ).json()
-
-    email = user_info["email"]
-
-    user = user_repository.get_by_email(db, email)
-
-    if not user:
-        user = User(email=email)
-        user_repository.create(db, user)
-
-    user.google_token = credentials.to_json()
-    user_repository.update(db, user)
-
-    access_token = create_access_token(
-        data={"sub": user.email}
-    )
-
-    return RedirectResponse(
-        url=f"{FRONTEND_URL}/?token={access_token}&auth=success"
-    )
+    try:
+        attempt = oauth_state.consume_attempt(db, state, request.cookies.get(oauth_state.cookie_name(state)))
+    except (ValueError, InvalidToken):
+        raise HTTPException(400, "Invalid or expired OAuth state. Start a new Gmail connection.") from None
+    if error or not code:
+        response = RedirectResponse(f"{FRONTEND_URL.rstrip('/')}/#auth=cancelled")
+    else:
+        try:
+            flow = gmail_service.create_google_flow(scopes=attempt.scopes)
+            flow.code_verifier = attempt.verifier
+            credentials = gmail_service.exchange_google_code(flow, code)
+            info_response = requests.get(
+                "https://openidconnect.googleapis.com/v1/userinfo",
+                headers={"Authorization": f"Bearer {credentials.token}"}, timeout=15,
+            )
+            info_response.raise_for_status()
+            info = info_response.json()
+            if info.get("email_verified") is not True or not info.get("email"):
+                raise HTTPException(400, "Google did not return a verified email address.")
+            email = info["email"].lower()
+            history_id = None
+            scopes = set(credentials.granted_scopes or credentials.scopes or [])
+            if scopes & account_service.PROFILE_SCOPES:
+                mailbox = gmail_service.get_gmail_service(credentials.to_json()).users().getProfile(userId="me").execute()
+                if mailbox["emailAddress"].lower() != email:
+                    raise HTTPException(400, "Google identity does not match this Gmail mailbox.")
+                history_id = mailbox.get("historyId")
+            user = user_repository.get_by_email(db, email)
+            if not user:
+                user = User(email=email, name=info.get("name"))
+                db.add(user)
+                db.flush()
+            account_service.save_connection(db, user, credentials, history_id)
+        except HTTPException:
+            db.rollback()
+            raise
+        except Exception:
+            db.rollback()
+            # Provider failures may contain tokens, codes and secrets. Never echo them.
+            raise HTTPException(502, "Gmail connection failed. Please start a new connection.") from None
+        access_token = create_access_token(data={"sub": user.email})
+        # Fragments are not sent to servers, access logs, or in Referer headers.
+        response = RedirectResponse(f"{FRONTEND_URL.rstrip('/')}/#" + urlencode({"token": access_token, "auth": "success"}))
+    response.delete_cookie(oauth_state.cookie_name(state), path="/api")
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
 @router.get("/profile")
-def get_profile(current_user: User = Depends(get_current_user)):
+def get_profile(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    account = account_service.find_account(db, current_user)
     return {
         "email": current_user.email,
         "name": current_user.name,
         "signature": current_user.signature,
         "preferences": current_user.preferences,
         "bio": current_user.bio,
-        "is_connected": bool(current_user.google_token),
+        "is_connected": bool(account and account.encrypted_credentials and not account.requires_reauth),
+        "requires_reauth": bool(account and account.requires_reauth),
     }
+
+
+@accounts_router.get("")
+def list_accounts(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    accounts = db.query(ConnectedAccount).filter(ConnectedAccount.user_id == current_user.id).all()
+    return [{"id": account.id, "email": account.gmail_email,
+             "is_connected": bool(account.encrypted_credentials and not account.requires_reauth),
+             "requires_reauth": account.requires_reauth,
+             "sync_paused": account.sync_paused, "last_synced_at": account.last_synced_at,
+             "next_sync_at": account.next_sync_at} for account in accounts]
+
+
+@accounts_router.delete("/{account_id}")
+def disconnect_gmail(account_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    account_service.disconnect_account(db, current_user, account_id)
+    return {"status": "disconnected"}
 
 @router.put("/profile")
 def update_profile(
@@ -112,9 +147,8 @@ def update_profile(
     return {"message": "Profile updated successfully"}
 
 @router.post("/send")
-def send_gmail_email(request: SendEmailRequest, current_user: User = Depends(get_current_user)):
-    if not current_user.google_token:
-        raise HTTPException(status_code=401, detail="Google token not found.")
+def send_gmail_email(request: SendEmailRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    credentials = account_service.credentials_for_user(db, current_user)
     try:
         attachment_dict = None
         if request.attachment:
@@ -128,8 +162,8 @@ def send_gmail_email(request: SendEmailRequest, current_user: User = Depends(get
             subject=request.subject,
             body=request.body,
             attachment=attachment_dict,
-            google_token=current_user.google_token,
+            google_token=credentials.to_json(),
         )
         return {"status": "success", "message_id": result["id"]}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to send email: {e!s}")
+    except Exception:
+        raise HTTPException(status_code=502, detail="Gmail could not confirm delivery. Check Sent in Gmail before trying again.") from None

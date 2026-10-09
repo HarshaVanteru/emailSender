@@ -17,9 +17,19 @@ DATABASE_URL = os.getenv(
     "DATABASE_URL", "mysql+pymysql://root:password@localhost:3306/email_sender"
 )
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
-SECRET_KEY = os.getenv("SECRET_KEY", "your-super-secret-key-for-jwt")
+SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24
+TOKEN_ENCRYPTION_KEY = os.getenv("TOKEN_ENCRYPTION_KEY")
+OAUTH_STATE_TTL_SECONDS = 600
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+SYNC_MAX_ATTEMPTS = max(1, int(os.getenv("SYNC_MAX_ATTEMPTS", "4")))
+SYNC_INTERVAL_SECONDS = max(30, int(os.getenv("SYNC_INTERVAL_SECONDS", "300")))
+SYNC_RECONCILE_SECONDS = max(300, int(os.getenv("SYNC_RECONCILE_SECONDS", "86400")))
+SYNC_TASK_TIME_LIMIT = max(60, int(os.getenv("SYNC_TASK_TIME_LIMIT", "1800")))
+SYNC_LEASE_SECONDS = SYNC_TASK_TIME_LIMIT + 60
+SYNC_REQUESTS_PER_SECOND = max(1, min(20, int(os.getenv("SYNC_REQUESTS_PER_SECOND", "10"))))
+GMAIL_READ_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 
 GMAIL_SCOPES = [
     "https://www.googleapis.com/auth/gmail.send",

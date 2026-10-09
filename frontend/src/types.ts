@@ -24,10 +24,19 @@ export interface SendEmailPayload {
 
 export interface GmailProfile {
   email: string;
+  is_connected: boolean;
+  requires_reauth?: boolean;
   name?: string;
   signature?: string;
   preferences?: string;
   bio?: string;
+}
+
+export interface ConnectedAccount {
+  id: number;
+  email: string;
+  is_connected: boolean;
+  requires_reauth: boolean;
 }
 
 export interface CopilotResponse {
