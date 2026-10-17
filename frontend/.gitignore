@@ -7,9 +7,17 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 .env
+.env.*
+!.env.example
 node_modules
 dist
 dist-ssr
+artifacts/
+coverage/
+playwright-report/
+test-results/
+.dev-runtime/
+*.tsbuildinfo
 *.local
 
 # Editor directories and files

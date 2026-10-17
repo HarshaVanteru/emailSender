@@ -16,12 +16,12 @@ from sqlalchemy.orm import Session
 
 from app.core.database import Base
 from app.core.token_crypto import decrypt
-from app.models.connection import ConnectedAccount
-from app.models.mailbox import (
-    AuditLog, EmailAttachment, EmailLabel, EmailMessage, EmailThread, MessageLabel, SyncJob,
+from app.features.google_login.models import ConnectedAccount
+from app.features.mailbox.models import (
+    AiSuggestion, AuditLog, EmailAttachment, EmailLabel, EmailMessage, EmailThread, MessageLabel, SyncJob,
 )
-from app.models.user import User
-from app.repositories.mailbox_repository import mailbox_repository
+from app.features.google_login.user import User
+from app.features.mailbox.repository import mailbox_repository
 
 BACKEND = Path(__file__).resolve().parents[1]
 MAILBOX_TABLES = {"email_threads", "email_messages", "email_labels", "message_labels",
@@ -89,6 +89,24 @@ class MailboxSchemaTests(unittest.TestCase):
                          {("account_id", "internal_date"), ("account_id", "thread_id", "internal_date")})
         self.assertIsNone(self.account.history_id)  # Profile is not a committed sync cursor.
         self.assertEqual(self.account.profile_history_id, "999")
+
+    def test_ai_suggestion_is_owner_scoped_and_migration_is_reversible(self):
+        thread = self.thread()
+        self.db.add(AiSuggestion(user_id=self.owner.id, account_id=self.account.id, thread_id=thread.id,
+                                 operation='summarize', input_hash='a' * 64, result={'summary': 'Notes'}))
+        self.db.flush()
+        self.assert_rejected(AiSuggestion(user_id=self.other.id, account_id=self.account.id, thread_id=thread.id,
+                                          operation='summarize', input_hash='b' * 64, result={}))
+        self.assert_rejected(AiSuggestion(user_id=self.owner.id, account_id=self.account.id,
+                                          thread_id=self.thread(self.other_account).id,
+                                          operation='summarize', input_hash='b' * 64, result={}))
+        self.db.rollback()
+        self.db.close()
+        command.downgrade(self.config, '0005')
+        self.assertNotIn('ai_suggestions', inspect(self.connection).get_table_names())
+        command.upgrade(self.config, 'head')
+        self.assertIn('ai_suggestions', inspect(self.connection).get_table_names())
+        self.db = Session(self.connection)
 
     def test_provider_ids_are_unique_per_account_and_can_repeat_between_accounts(self):
         thread = self.thread()

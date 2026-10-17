@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core import config
 from app.core.config import ACCESS_TOKEN_EXPIRE_MINUTES, ALGORITHM
 from app.core.database import get_db
-from app.models.user import User
+from app.features.google_login.user import User
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/token", auto_error=False)
 

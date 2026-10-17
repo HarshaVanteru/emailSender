@@ -1,2 +1,12 @@
-.agents
-.agents
+# Local agent state and development runtime
+.agents/
+.codex/
+.dev-runtime/
+
+# Editor and operating system files
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini

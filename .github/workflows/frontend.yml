@@ -45,6 +45,12 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      - name: Lint and unit tests
+        working-directory: frontend
+        run: |
+          npm run lint
+          node --test tests/*.test.mjs
+
       - name: Build Vite bundle
         working-directory: frontend
         env:

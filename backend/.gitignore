@@ -1,7 +1,38 @@
-__pycache__/
-*.pyc
+# Environment and credentials
 .env
-.venv/
-myenv/
+.env.*
+!.env.example
 credentials/
- 
+
+# Python environments and bytecode
+.venv/
+venv/
+myenv/
+__pycache__/
+*.py[cod]
+
+# Tool caches and coverage
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Build output
+build/
+dist/
+*.egg-info/
+
+# Local runtime, logs, and databases
+.dev-runtime/
+*.log
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+celerybeat-schedule*
+celerybeat.pid

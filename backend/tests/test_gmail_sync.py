@@ -15,11 +15,11 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
 from app.core.security import get_current_user
-from app.models.connection import ConnectedAccount
-from app.models.mailbox import AuditLog, EmailAttachment, EmailLabel, EmailMessage, EmailThread, MessageLabel, SyncJob
-from app.models.user import User
-from app.services import gmail_sync
-from app.services.gmail_mime import InvalidMessage, normalize_message
+from app.features.google_login.models import ConnectedAccount
+from app.features.mailbox.models import AuditLog, EmailAttachment, EmailLabel, EmailMessage, EmailThread, MessageLabel, SyncJob
+from app.features.google_login.user import User
+from app.features.mail_sync import service as gmail_sync
+from app.integrations.gmail.mime import InvalidMessage, normalize_message
 
 READ_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 
@@ -30,7 +30,7 @@ def encoded(text, charset="utf-8"):
 
 def message(gmail_id="m1", labels=None, thread="t1", date="1770000000000"):
     return {"id": gmail_id, "threadId": thread, "historyId": "100", "internalDate": date,
-            "sizeEstimate": 500, "labelIds": labels if labels is not None else ["INBOX", "UNREAD"],
+            "sizeEstimate": 600, "labelIds": labels if labels is not None else ["INBOX", "UNREAD"],
             "snippet": "Hello", "payload": {"mimeType": "multipart/mixed", "headers": [
                 {"name": "From", "value": '"Sender" <sender@example.com>'},
                 {"name": "To", "value": '"Owner" <owner@example.com>'},
@@ -202,7 +202,7 @@ class GmailSyncTests(unittest.TestCase):
 
     def test_later_history_page_failure_cannot_advance_cursor(self):
         self.sync()
-        self.service.history_pages = {None: {"historyId": "110", "history": [], "nextPageToken": "next"}, "next": error(500)}
+        self.service.history_pages = {None: {"historyId": "110", "history": [], "nextPageToken": "next"}, "next": error(600)}
         with self.assertRaises(HTTPException): self.sync()
         self.assertEqual(self.account.history_id, "100")
 
@@ -336,9 +336,9 @@ class GmailMimeTests(unittest.TestCase):
         self.assertEqual(len(normalized["attachments"]), 2)
 
     def test_size_and_depth_limits_fail_without_truncation(self):
-        with patch("app.services.gmail_mime.MAX_BODY_BYTES", 1):
+        with patch("app.integrations.gmail.mime.MAX_BODY_BYTES", 1):
             with self.assertRaises(InvalidMessage): normalize_message(message())
-        with patch("app.services.gmail_mime.MAX_DEPTH", 0):
+        with patch("app.integrations.gmail.mime.MAX_DEPTH", 0):
             with self.assertRaises(InvalidMessage): normalize_message(message())
 
 

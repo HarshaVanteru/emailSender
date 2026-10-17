@@ -13,9 +13,13 @@ celery_app.conf.update(
     task_soft_time_limit=config.SYNC_TASK_TIME_LIMIT - 10,
     task_time_limit=config.SYNC_TASK_TIME_LIMIT,
     timezone="UTC", enable_utc=True,
-    task_routes={"mailbox.sync": {"queue": "gmail-sync"},
-                 "mailbox.maintenance": {"queue": "gmail-maintenance"}},
-    beat_schedule={"mailbox-maintenance": {"task": "mailbox.maintenance", "schedule": 30.0}},
+    task_routes={"mailbox.triage": {"queue": "gmail-ai"},
+                 "mailbox.sync": {"queue": "gmail-sync"},
+                 "mailbox.maintenance": {"queue": "gmail-maintenance"},
+                 "mailbox.watch_renewal": {"queue": "gmail-maintenance"}},
+    beat_schedule={"mailbox-triage": {"task": "mailbox.triage", "schedule": 30.0},
+                   "mailbox-maintenance": {"task": "mailbox.maintenance", "schedule": 30.0},
+                   "gmail-watch-renewal": {"task": "mailbox.watch_renewal", "schedule": 3600.0}},
 )
 
 

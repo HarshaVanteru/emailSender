@@ -6,8 +6,8 @@ from email.parser import BytesParser
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from app.services.email_layout import reflow_email_body, render_email_html
-from app.services.gmail_service import GmailService
+from app.features.compose_email.email_layout import reflow_email_body, render_email_html
+from app.integrations.gmail.client import GmailService
 
 
 class EmailLayoutTests(unittest.TestCase):

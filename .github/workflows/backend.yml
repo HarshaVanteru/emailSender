@@ -9,6 +9,12 @@ on:
       - "backend/**"
       - ".github/workflows/backend.yml"
 
+  pull_request:
+    branches: [main, master]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend.yml"
+
   workflow_dispatch:
 
 # One deploy at a time per branch.
@@ -23,7 +29,31 @@ env:
   SERVICE_NAME: emailsender
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install test dependencies
+        run: python -m pip install -r backend/requirements.txt
+      - name: Backend regression tests
+        working-directory: backend
+        env:
+          DATABASE_URL: sqlite://
+          GROQ_API_KEY: test-not-real
+        run: python -m unittest discover -s tests -v
+      - name: Validate Compose configuration
+        run: |
+          cp backend/.env.example backend/.env
+          docker compose -f backend/compose.yaml config --quiet
+
   build:
+    needs: test
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04-arm
 
     permissions:

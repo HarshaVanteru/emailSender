@@ -20,9 +20,9 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base, get_db
 from app.core.security import get_current_user
 from app.core.token_crypto import decrypt, encrypt
-from app.models.connection import ConnectedAccount, OAuthAttempt
-from app.models.user import User
-from app.services import account_service, oauth_state
+from app.features.google_login.models import ConnectedAccount, OAuthAttempt
+from app.features.google_login.user import User
+from app.features.google_login import accounts as account_service, oauth_state
 
 
 def credentials(refresh="refresh-secret", expired=False, scopes=None):
@@ -74,19 +74,19 @@ class ConnectionSecurityTests(unittest.TestCase):
                 oauth_state.consume_attempt(fresh_session, state, browser)
 
     def test_pre_upgrade_pending_attempt_defaults_to_original_send_scopes(self):
-        from app.core.config import GMAIL_SCOPES
-        state, browser, _ = oauth_state.create_attempt(self.db)
+        from app.core.config import GMAIL_LEGACY_SCOPES
+        state, browser, _ = oauth_state.create_attempt(self.db, GMAIL_LEGACY_SCOPES)
         row = self.db.get(OAuthAttempt, oauth_state.digest(state))
         row.requested_scopes = None
         self.db.commit()
-        self.assertEqual(oauth_state.consume_attempt(self.db, state, browser).scopes, GMAIL_SCOPES)
+        self.assertEqual(oauth_state.consume_attempt(self.db, state, browser).scopes, GMAIL_LEGACY_SCOPES)
 
     def test_expired_state_is_rejected_without_token_exchange(self):
         state, browser, _ = oauth_state.create_attempt(self.db)
         self.db.query(OAuthAttempt).update({"expires_at": oauth_state.now() - timedelta(seconds=1)})
         self.db.commit()
         self.client.cookies.set(oauth_state.cookie_name(state), browser, path="/api")
-        with patch("app.controllers.gmail_controller.gmail_service.create_google_flow") as create:
+        with patch("app.features.google_login.routes.gmail_service.create_google_flow") as create:
             response = self.client.get("/api/v1/auth/google/callback", params={"state": state, "code": "code"})
         self.assertEqual(response.status_code, 400)
         create.assert_not_called()
@@ -109,7 +109,7 @@ class ConnectionSecurityTests(unittest.TestCase):
         import hashlib
         flow = MagicMock()
         flow.authorization_url.return_value = ("https://accounts.google.com/test", "ignored")
-        with patch("app.controllers.gmail_controller.gmail_service.create_google_flow", return_value=flow):
+        with patch("app.features.google_login.routes.gmail_service.create_google_flow", return_value=flow):
             for renew in (False, True):
                 response = self.client.get("/api/v1/auth/google", params={"renew_consent": str(renew).lower()}, follow_redirects=False)
                 args = flow.authorization_url.call_args.kwargs
@@ -128,27 +128,47 @@ class ConnectionSecurityTests(unittest.TestCase):
         userinfo.json.return_value = info or {"email": self.user.email, "email_verified": True}
         service = MagicMock()
         service.users.return_value.getProfile.return_value.execute.return_value = mailbox
-        with patch("app.controllers.gmail_controller.gmail_service.create_google_flow", return_value=flow) as create_flow, patch(
-            "app.controllers.gmail_controller.requests.get", return_value=userinfo), patch(
-            "app.controllers.gmail_controller.gmail_service.get_gmail_service", return_value=service):
+        with patch("app.features.google_login.routes.gmail_service.create_google_flow", return_value=flow) as create_flow, patch(
+            "app.features.google_login.routes.requests.get", return_value=userinfo), patch(
+            "app.features.google_login.routes.gmail_service.get_gmail_service", return_value=service):
             response = self.client.get("/api/v1/auth/google/callback", params={"state": state, "code": "code"}, follow_redirects=False)
         self.assertEqual(flow.code_verifier, verifier)
         create_flow.assert_called_once_with(scopes=creds.scopes)
         return response, service
 
-    def test_mailbox_permission_is_opt_in_and_persisted_in_oauth_attempt(self):
-        from app.core.config import GMAIL_READ_SCOPE
+    def test_all_features_are_requested_and_persisted_for_default_and_legacy_urls(self):
+        from app.core.config import GMAIL_COMPOSE_SCOPE, GMAIL_MODIFY_SCOPE, GMAIL_READ_SCOPE, GMAIL_SCOPES
         flow = MagicMock()
         flow.authorization_url.return_value = ("https://accounts.google.com/test", "ignored")
-        with patch("app.controllers.gmail_controller.gmail_service.create_google_flow", return_value=flow) as create:
-            for enable in (False, True):
-                response = self.client.get("/api/v1/auth/google", params={"mailbox_access": str(enable).lower()}, follow_redirects=False)
+        with patch("app.features.google_login.routes.gmail_service.create_google_flow", return_value=flow) as create:
+            for params in ({}, {"mailbox_access": "true"}, {"modify_access": "true"},
+                           {"draft_access": "true"}, {"mailbox_access": "true", "draft_access": "true"},
+                           {"mailbox_access": "false", "modify_access": "false", "draft_access": "false"}):
+                response = self.client.get("/api/v1/auth/google", params=params, follow_redirects=False)
                 self.assertEqual(response.status_code, 307)
                 scopes = create.call_args.kwargs["scopes"]
-                self.assertEqual(GMAIL_READ_SCOPE in scopes, enable)
+                self.assertEqual(scopes, GMAIL_SCOPES)
+                self.assertIn(GMAIL_MODIFY_SCOPE, scopes)
+                self.assertNotIn(GMAIL_READ_SCOPE, scopes)
+                self.assertNotIn(GMAIL_COMPOSE_SCOPE, scopes)
+                self.assertEqual(len(scopes), len(set(scopes)))
                 state = flow.authorization_url.call_args.kwargs["state"]
                 row = self.db.get(OAuthAttempt, oauth_state.digest(state))
                 self.assertEqual(json.loads(row.requested_scopes), scopes)
+
+    def test_legacy_modify_flag_keeps_the_default_scope_set(self):
+        from app.core.config import GMAIL_MODIFY_SCOPE, GMAIL_READ_SCOPE
+        flow = MagicMock()
+        flow.authorization_url.return_value = ("https://accounts.google.com/test", "ignored")
+        with patch("app.features.google_login.routes.gmail_service.create_google_flow", return_value=flow) as create:
+            response = self.client.get("/api/v1/auth/google", params={"modify_access": "true"}, follow_redirects=False)
+        self.assertEqual(response.status_code, 307)
+        scopes = create.call_args.kwargs["scopes"]
+        self.assertIn(GMAIL_MODIFY_SCOPE, scopes)
+        self.assertNotIn(GMAIL_READ_SCOPE, scopes)
+        state = flow.authorization_url.call_args.kwargs["state"]
+        row = self.db.get(OAuthAttempt, oauth_state.digest(state))
+        self.assertEqual(json.loads(row.requested_scopes), scopes)
 
     def test_callback_encrypts_preserves_refresh_and_uses_fragment(self):
         account = account_service.save_connection(self.db, self.user, credentials())
@@ -168,10 +188,45 @@ class ConnectionSecurityTests(unittest.TestCase):
         self.assertEqual(account_service.find_account(self.db, self.user).profile_history_id, "123")
         service.users.return_value.getProfile.assert_called_once_with(userId="me")
 
+    def test_missing_refresh_redirects_to_recovery_without_creating_session(self):
+        from app.core.config import GMAIL_COMPOSE_SCOPE, GMAIL_MODIFY_SCOPE, GMAIL_READ_SCOPE
+        for scope, flag in (
+            ("https://www.googleapis.com/auth/gmail.send", None),
+            (GMAIL_READ_SCOPE, "mailbox_access"),
+            (GMAIL_MODIFY_SCOPE, "modify_access"),
+            (GMAIL_COMPOSE_SCOPE, "draft_access"),
+        ):
+            with self.subTest(scope=scope), patch("app.features.google_login.routes.create_access_token") as session:
+                response, _ = self.callback(credentials(refresh=None, scopes=[scope]),
+                    info={"email": "new@example.com", "email_verified": True},
+                    mailbox={"emailAddress": "new@example.com", "historyId": "123"})
+                self.assertEqual(response.status_code, 307)
+                redirect = urlsplit(response.headers["location"])
+                expected = {"auth": ["offline_access_required"]}
+                if flag:
+                    expected[flag] = ["true"]
+                self.assertEqual(parse_qs(redirect.fragment), expected)
+                self.assertEqual(redirect.query, "")
+                self.assertEqual(response.headers["cache-control"], "no-store")
+                self.assertEqual(response.headers["referrer-policy"], "no-referrer")
+                self.assertIn("Max-Age=0", response.headers["set-cookie"])
+                self.assertEqual(self.db.query(OAuthAttempt).count(), 0)
+                self.assertEqual(self.db.query(ConnectedAccount).count(), 0)
+                self.assertIsNone(self.db.query(User).filter_by(email="new@example.com").first())
+                session.assert_not_called()
+
+    def test_renewed_grant_completes_connection_after_missing_refresh(self):
+        response, _ = self.callback(credentials(refresh=None))
+        self.assertIn("auth=offline_access_required", response.headers["location"])
+        response, _ = self.callback(credentials())
+        self.assertEqual(parse_qs(urlsplit(response.headers["location"]).fragment)["auth"], ["success"])
+        account = account_service.find_account(self.db, self.user)
+        self.assertEqual(json.loads(decrypt(account.encrypted_credentials))["refresh_token"], "refresh-secret")
+
     def test_gmail_client_accepts_fresh_returning_grant_without_refresh_token(self):
-        from app.services.gmail_service import gmail_service
+        from app.integrations.gmail.client import gmail_service
         creds = credentials(refresh=None)
-        with patch("app.services.gmail_service.build") as build:
+        with patch("app.integrations.gmail.client.build") as build:
             gmail_service.get_gmail_service(creds.to_json())
         restored = build.call_args.kwargs["http"].credentials
         self.assertEqual(restored.token, "access-secret")
@@ -180,7 +235,7 @@ class ConnectionSecurityTests(unittest.TestCase):
 
     def test_token_exchange_tracks_actual_incremental_or_partial_granted_scopes(self):
         from google_auth_oauthlib.flow import Flow
-        from app.services.gmail_service import gmail_service
+        from app.integrations.gmail.client import gmail_service
         send = "https://www.googleapis.com/auth/gmail.send"
         read = "https://www.googleapis.com/auth/gmail.readonly"
         settings = {"web": {"client_id": "test-client", "client_secret": "test-secret",
@@ -240,7 +295,7 @@ class ConnectionSecurityTests(unittest.TestCase):
         response = self.client.get("/api/v1/accounts")
         self.assertEqual([row["id"] for row in response.json()], [own.id])
         self.assertNotIn("secret", response.text)
-        with patch("app.services.account_service.requests.post") as revoke:
+        with patch("app.features.google_login.accounts.requests.post") as revoke:
             self.assertEqual(self.client.delete(f"/api/v1/accounts/{other.id}").status_code, 404)
         revoke.assert_not_called()
         self.app.dependency_overrides.pop(get_current_user)
@@ -249,21 +304,21 @@ class ConnectionSecurityTests(unittest.TestCase):
     def test_disconnect_revokes_and_disables_send_while_preserving_preferences(self):
         self.user.signature = "Keep this signature"
         account = account_service.save_connection(self.db, self.user, credentials())
-        with patch("app.services.account_service.requests.post", return_value=MagicMock(status_code=200)) as revoke:
+        with patch("app.features.google_login.accounts.requests.post", return_value=MagicMock(status_code=200)) as revoke:
             response = self.client.delete(f"/api/v1/accounts/{account.id}")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(revoke.call_args.kwargs["data"]["token"], "refresh-secret")
         self.assertIsNone(account.encrypted_credentials)
         self.assertEqual(self.user.signature, "Keep this signature")
         self.assertFalse(self.client.get("/api/v1/gmail/profile").json()["is_connected"])
-        with patch("app.controllers.gmail_controller.gmail_service.send_email") as send:
+        with patch("app.features.compose_email.routes.gmail_service.send_email") as send:
             response = self.client.post("/api/v1/gmail/send", json={"to": "test@example.com", "subject": "Test", "body": "Hello"})
         self.assertEqual(response.status_code, 409)
         send.assert_not_called()
 
     def test_revocation_failure_retains_connection_for_retry(self):
         account = account_service.save_connection(self.db, self.user, credentials())
-        with patch("app.services.account_service.requests.post", side_effect=requests.Timeout()):
+        with patch("app.features.google_login.accounts.requests.post", side_effect=requests.Timeout()):
             response = self.client.delete(f"/api/v1/accounts/{account.id}")
         self.assertEqual(response.status_code, 502)
         self.assertTrue(account.encrypted_credentials)

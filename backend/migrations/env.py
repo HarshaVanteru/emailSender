@@ -3,9 +3,9 @@ from sqlalchemy import create_engine, pool
 
 from app.core.config import DATABASE_URL
 from app.core.database import Base
-import app.models.user
-import app.models.connection
-import app.models.mailbox
+import app.features.google_login.user
+import app.features.google_login.models
+import app.features.mailbox.models
 
 config = context.config
 

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { reflowEmailBody } from '../src/emailLayout.ts';
+import { reflowEmailBody } from '../src/features/compose-email/emailLayout.ts';
 
 // Both delivery and preview must agree on wrapping, including existing drafts.
 const fixtures = JSON.parse(readFileSync(

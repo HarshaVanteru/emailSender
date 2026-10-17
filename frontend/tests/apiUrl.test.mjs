@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { buildApiUrl } from '../src/apiUrl.ts';
+import { buildApiUrl } from '../src/shared/api/apiUrl.ts';
 
 test('configured API origins never duplicate API or version prefixes', () => {
   for (const base of [

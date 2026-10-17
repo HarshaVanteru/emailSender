@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
 from app.core.security import get_current_user
-from app.schemas.ai import CopilotResponse, GeneratedEmail
+from app.features.ai_assistant.schemas import CopilotResponse, GeneratedEmail
 
 
 class ApiVersioningTests(unittest.TestCase):
@@ -36,8 +36,8 @@ class ApiVersioningTests(unittest.TestCase):
         self.engine.dispose()
 
     def authorize(self):
-        from app.models.user import User
-        from app.models.connection import ConnectedAccount
+        from app.features.google_login.user import User
+        from app.features.google_login.models import ConnectedAccount
         self.user = User(
             email="sender@example.com", name="Sender", bio=None,
             signature=None, preferences=None, google_token="test-only-token",
@@ -74,7 +74,7 @@ class ApiVersioningTests(unittest.TestCase):
 
     def test_profile_and_reviewed_send_work_through_both_versions(self):
         self.authorize()
-        from app.controllers.gmail_controller import gmail_service, user_repository
+        from app.features.google_login.routes import gmail_service, user_repository
         for prefix in ("/api", "/api/v1"):
             self.assertEqual(self.client.get(prefix + "/gmail/profile").json()["email"], self.user.email)
             with patch.object(user_repository, "update") as update:
@@ -82,7 +82,7 @@ class ApiVersioningTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 200)
                 update.assert_called_once()
             with patch.object(gmail_service, "send_email", return_value={"id": "mock-message"}) as send, patch(
-                "app.services.account_service.credentials_for_user", return_value=MagicMock()):
+                "app.features.google_login.accounts.credentials_for_user", return_value=MagicMock()):
                 response = self.client.post(prefix + "/gmail/send", json={
                     "to": "recipient@example.com", "subject": "Test", "body": "Hello",
                 })
@@ -92,8 +92,8 @@ class ApiVersioningTests(unittest.TestCase):
 
     def test_ai_returns_drafts_without_sending(self):
         self.authorize()
-        from app.controllers.ai_controller import ai_service
-        from app.controllers.gmail_controller import gmail_service
+        from app.features.ai_assistant.routes import ai_service
+        from app.features.google_login.routes import gmail_service
         suggestion = CopilotResponse(draft=GeneratedEmail(
             to="recipient@example.com", subject="Test", body="Hello",
         ))
@@ -106,8 +106,8 @@ class ApiVersioningTests(unittest.TestCase):
                 send.assert_not_called()
 
     def test_oauth_aliases_share_state_and_reject_invalid_callbacks(self):
-        from app.controllers.gmail_controller import gmail_service
-        from app.models.connection import OAuthAttempt
+        from app.features.google_login.routes import gmail_service
+        from app.features.google_login.models import OAuthAttempt
         flow = MagicMock()
         flow.authorization_url.return_value = ("https://accounts.google.com/test-auth", "mock-state")
         flow.code_verifier = "mock-verifier"

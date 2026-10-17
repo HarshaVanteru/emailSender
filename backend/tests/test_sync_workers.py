@@ -14,11 +14,11 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
-from app.models.connection import ConnectedAccount
-from app.models.mailbox import EmailMessage, SyncJob
-from app.models.user import User
-from app.services import sync_jobs as jobs
-from app.services.gmail_sync import utcnow
+from app.features.google_login.models import ConnectedAccount
+from app.features.mailbox.models import EmailMessage, SyncJob
+from app.features.google_login.user import User
+from app.features.mail_sync import jobs as jobs
+from app.features.mail_sync.service import utcnow
 from app.workers.rate_limit import GmailRateLimiter
 from test_gmail_sync import FakeGmail, READ_SCOPE, error, message
 
@@ -155,6 +155,23 @@ class WorkerTests(unittest.TestCase):
                         b'{"error":{"errors":[{"reason":"userRateLimitExceeded"}]}}')
         self.assertEqual(jobs.classify_failure(exc), ("gmail_rate_limited", True))
         self.assertEqual(jobs.classify_failure(error(403)), ("gmail_http_403", False))
+
+    def test_server_failures_retry_while_client_failures_remain_permanent(self):
+        for status in (400, 401, 403, 404, 500, 502, 503, 504):
+            with self.subTest(status=status):
+                retryable = status >= 500
+                self.assertEqual(jobs.classify_failure(error(status)), (f"gmail_http_{status}", retryable))
+                self.assertEqual(jobs.classify_failure(HTTPException(status)), ("connection_unavailable", retryable))
+
+    def test_temporary_connection_failure_requeues_job_then_recovers(self):
+        jid = self.enqueue()
+        with patch.object(jobs, "check_read_access", side_effect=HTTPException(503)):
+            job = self.run_job(jid)
+        self.assertEqual((job.status, job.attempts, job.error_code), ("queued", 1, "connection_unavailable"))
+        self.assertFalse(self.db.get(ConnectedAccount, self.aid).sync_paused)
+        self.make_due(jid)
+        job = self.run_job(jid)
+        self.assertEqual((job.status, job.attempts, job.error_code), ("succeeded", 2, None))
 
     def test_worker_loss_recovers_and_old_token_cannot_overwrite_new_attempt(self):
         jid = self.enqueue()
