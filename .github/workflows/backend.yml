@@ -151,20 +151,33 @@ jobs:
         run: |
           ssh deploy "DEPLOY_DIR='$DEPLOY_DIR' SERVICE_NAME='$SERVICE_NAME' bash -s" <<'REMOTE'
           set -euo pipefail
+          cd "$DEPLOY_DIR"
+
+          # Probe the deployed service directly. The host's port 8000 can belong
+          # to another service, and production can override the container PORT.
+          check_api_health() {
+            docker compose exec -T "$SERVICE_NAME" python -c '
+          import json, os, urllib.request
+          url = "http://127.0.0.1:" + os.environ.get("PORT", "8000") + "/api/health"
+          with urllib.request.urlopen(url, timeout=1) as response:
+              payload = json.load(response)
+              if payload.get("status") != "healthy" or payload.get("service") != "emailSender API":
+                  raise SystemExit("Unexpected health response: " + repr(payload))
+          '
+          }
 
           for _ in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:8000/api/health >/dev/null; then
+            if check_api_health; then
               echo "API is ready"
               exit 0
             fi
             sleep 2
           done
 
-          echo "The API was not ready within 60 seconds" >&2
-          curl -sS -o /dev/null -w 'Last /api/health status: %{http_code}\n' \
-            http://127.0.0.1:8000/api/health || true
+          echo "The API was not ready after 30 attempts" >&2
+          check_api_health || true
 
-          cd "$DEPLOY_DIR"
+          docker compose ps "$SERVICE_NAME"
           docker compose logs --tail=80 "$SERVICE_NAME"
           exit 1
           REMOTE
