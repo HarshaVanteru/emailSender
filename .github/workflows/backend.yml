@@ -142,6 +142,9 @@ jobs:
           mv .env.next .env
 
           docker compose pull "$SERVICE_NAME"
+          docker compose pull "$SERVICE_NAME"
+          docker compose run --rm --no-deps "$SERVICE_NAME" python -m alembic upgrade head
+          docker compose up -d --remove-orphans
           docker compose up -d --remove-orphans
           docker image prune -f
           docker compose ps
