@@ -27,8 +27,8 @@ export const Header: React.FC<HeaderProps> = ({ profile, checkingAuth, onRefresh
           <span className="brand-name">Email Studio</span>
         </div>
         <nav className="workspace-switch" aria-label="Workspace">
-          <button type="button" aria-label="Mail" title="Mailbox" aria-current={workspace === 'mail' ? 'page' : undefined} onClick={() => onWorkspaceChange('mail')}><Mail size={17} aria-hidden="true" /></button>
-          <button type="button" aria-label="Write" title={hasActiveDraft ? 'Write — draft in progress' : 'Write an email'} aria-current={workspace === 'write' ? 'page' : undefined} onClick={() => onWorkspaceChange('write')}><PenLine size={17} aria-hidden="true" />{hasActiveDraft && <span className="draft-dot" aria-label="Draft in progress" />}</button>
+          <button type="button" aria-label="Mail" title="Mailbox" aria-current={workspace === 'mail' ? 'page' : undefined} onClick={() => onWorkspaceChange('mail')}><Mail size={17} aria-hidden="true" /><span className="workspace-label">Mail</span></button>
+          <button type="button" aria-label="Write" title={hasActiveDraft ? 'Write — draft in progress' : 'Write an email'} aria-current={workspace === 'write' ? 'page' : undefined} onClick={() => onWorkspaceChange('write')}><PenLine size={17} aria-hidden="true" /><span className="workspace-label">Write</span>{hasActiveDraft && <span className="draft-dot" aria-label="Draft in progress" />}</button>
         </nav>
       </div>
 

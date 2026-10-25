@@ -73,12 +73,12 @@
 
 
   .studio-shell {
-    --canvas: #f5f6fa;
+    --canvas: #f3f5f9;
     --surface: #ffffff;
-    --soft: #f8f9fc;
-    --ink: #25293d;
-    --muted: #656b81;
-    --line: #e2e5ef;
+    --soft: #f7f8fc;
+    --ink: #20263b;
+    --muted: #59647a;
+    --line: #dde3ee;
     --accent: #5851d8;
     --accent-soft: #eeedff;
     height: 100vh;
@@ -97,10 +97,10 @@
     --accent: #afa8ff;
     --accent-soft: #302c50;
   }
-  .studio-header { height: 52px; min-height: 52px; padding-inline: 20px; background: var(--surface); border-bottom: 1px solid var(--line); gap: 12px; }
-  .brand-mark { width: 28px; height: 28px; border-radius: 8px; background: #5851d8; color: white; }
+  .studio-header { height: 64px; min-height: 64px; padding-inline: 24px; background: var(--surface); border-bottom: 1px solid var(--line); gap: 12px; }
+  .brand-mark { width: 34px; height: 34px; border-radius: 10px; background: #5851d8; color: white; }
   .brand-mark svg { width: 16px; height: 16px; }
-  .brand-name { color: var(--ink); font-size: 14px; font-weight: 650; letter-spacing: -.4px; white-space: nowrap; }
+  .brand-name { color: var(--ink); font-size: 16px; font-weight: 650; letter-spacing: -.4px; white-space: nowrap; }
   .eyebrow { font-size: 10px; font-weight: 700; letter-spacing: 1.8px; color: var(--accent); }
   .studio-workspace { min-height: 0; gap: 12px; margin: 12px; }
   .copilot-column, .composer-column { min-height: 0; }
@@ -337,4 +337,12 @@
   .compose-feedback { padding-inline: 16px; }
   .writing-workspace .composer-footer { padding-right: 16px; }
   .writing-workspace .composer-footer button[type="submit"] { padding-inline: 12px; }
+}
+
+/* Shared interaction states remain visible in both themes. */
+.studio-shell :is(button, a, select) { touch-action: manipulation; }
+.studio-shell select:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.studio-shell :is(button, a):not(:disabled) { transition: background-color .15s, border-color .15s, color .15s; }
+@media (prefers-reduced-motion: reduce) {
+  .studio-shell :is(button, a):not(:disabled) { transition: none; }
 }
