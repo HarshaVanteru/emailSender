@@ -154,7 +154,8 @@ jobs:
           # Explicit one-time adoption of the original users-only database.
           # Refuse to stamp a versioned or partially migrated database.
           if [ "$BASELINE_LEGACY_DATABASE" = "true" ]; then
-            docker compose run --rm --no-deps "$SERVICE_NAME" python -c '
+            # Never let a container consume the SSH heredoc containing this script.
+            docker compose run -T --interactive=false --rm --no-deps "$SERVICE_NAME" python -c '
           from alembic import command
           from alembic.config import Config
           from alembic.migration import MigrationContext
@@ -173,12 +174,14 @@ jobs:
               if columns != expected:
                   raise SystemExit("Refusing legacy stamp: users columns do not match migration 0001.")
           command.stamp(Config("alembic.ini"), "0001")
-          '
+          ' < /dev/null
           fi
 
-          docker compose run --rm --no-deps "$SERVICE_NAME" python -m alembic upgrade head
-          docker compose run --rm --no-deps "$SERVICE_NAME" python -m alembic current
-          docker compose up -d --remove-orphans
+          echo "Applying database migrations"
+          docker compose run -T --interactive=false --rm --no-deps "$SERVICE_NAME" python -m alembic upgrade head < /dev/null
+          docker compose run -T --interactive=false --rm --no-deps "$SERVICE_NAME" python -m alembic current < /dev/null
+          echo "Starting API after successful migrations"
+          docker compose up -d --remove-orphans "$SERVICE_NAME" < /dev/null
           docker image prune -f
           docker compose ps
           REMOTE
@@ -213,7 +216,7 @@ jobs:
           echo "The API was not ready after 30 attempts" >&2
           check_api_health || true
 
-          docker compose ps "$SERVICE_NAME"
-          docker compose logs --tail=80 "$SERVICE_NAME"
+          docker compose ps -a "$SERVICE_NAME"
+          docker compose logs --since=15m --tail=150 "$SERVICE_NAME"
           exit 1
           REMOTE
