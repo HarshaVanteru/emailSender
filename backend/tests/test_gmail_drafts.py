@@ -1,6 +1,7 @@
 """Draft MIME round-trips and explicit reviewed Gmail sends."""
 import base64
 import json
+from email import message_from_bytes, policy
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -82,6 +83,33 @@ class GmailDraftTests(unittest.TestCase):
         item = draft_details({'id': 'draft1', 'message': {'raw': raw}})
         self.assertTrue(item['can_edit'])
         self.assertEqual(base64.b64decode(item['attachments'][0]['data']), b'hello')
+
+    def test_app_draft_with_connected_sender_can_be_updated_and_sent(self):
+        message = message_from_bytes(base64.urlsafe_b64decode(self.raw), policy=policy.default)
+        message['From'] = 'Owner <owner@example.com>'
+        raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
+        self.resource.get.return_value.execute.return_value = {'id': 'draft1', 'message': {'raw': raw}}
+        current = get_draft(self.db, self.owner.id, self.account.id, 'draft1', self.provider, self.gate)
+        self.assertTrue(current['can_edit'])
+        changed = self.input.model_copy(update={'content_hash': current['content_hash']})
+        save_draft(self.db, self.owner.id, self.account.id, changed, 'draft1', self.provider, self.gate)
+        result = send_draft(self.db, self.owner.id, self.account.id, 'draft1', current['content_hash'], self.provider, self.gate)
+        self.assertEqual(result['message_id'], 'sent1')
+
+    def test_other_sender_reply_headers_and_duplicate_sender_remain_protected(self):
+        for header, value in [('From', 'other@example.com'), ('Reply-To', 'other@example.com'),
+                              ('In-Reply-To', '<original@example.com>'), ('References', '<original@example.com>'),
+                              ('From', 'owner@example.com\nFrom: owner@example.com')]:
+            with self.subTest(header=header, value=value):
+                raw = base64.urlsafe_b64encode(
+                    f'{header}: {value}\n'.encode() + base64.urlsafe_b64decode(self.raw)).decode()
+                self.resource.get.return_value.execute.return_value = {'id': 'draft1', 'message': {'raw': raw}}
+                current = get_draft(self.db, self.owner.id, self.account.id, 'draft1', self.provider, self.gate)
+                self.assertFalse(current['can_edit'])
+                with self.assertRaises(Exception) as caught:
+                    send_draft(self.db, self.owner.id, self.account.id, 'draft1', current['content_hash'], self.provider, self.gate)
+                self.assertEqual(caught.exception.status_code, 409)
+        self.resource.send.assert_not_called()
 
     def test_scope_ownership_and_validation_fail_before_provider_call(self):
         self.account.scopes = json.dumps([GMAIL_READ_SCOPE]); self.db.commit()

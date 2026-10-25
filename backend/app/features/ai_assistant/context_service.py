@@ -11,7 +11,7 @@ from app.features.mailbox.models import AiSuggestion, EmailMessage
 from app.features.mailbox.repository import mailbox_repository
 from app.features.ai_assistant.context_schemas import ContextAiOutput
 from app.features.ai_assistant.service import ai_service
-from app.features.drafts.service import PlainText
+from app.integrations.gmail.text import html_to_text
 from app.features.mail_sync.service import owned_account
 from app.features.compose_email.thread_service import addresses, header, unique_addresses
 
@@ -36,9 +36,7 @@ def plain_text(message):
     if message.body_text:
         return message.body_text
     if message.body_html:
-        parser = PlainText()
-        parser.feed(message.body_html[:MAX_MESSAGE_CHARS * 2])
-        return ''.join(parser.parts).strip()
+        return html_to_text(message.body_html[:MAX_MESSAGE_CHARS * 2]).strip()
     return message.snippet or ''
 
 

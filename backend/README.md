@@ -607,6 +607,13 @@ for mocked desktop/mobile incoming mail, reconnect, and unsent-reply preservatio
 
 ## Everyday compose tools
 
+Drafts whose sender matches the connected Gmail account can be edited and sent
+when their content is supported. For unsupported drafts, choose **Create editable
+copy** to start a new draft from the displayed text, recipients, and available
+attachments. Confirming this action drops original formatting, sender/reply
+headers, and threading; the original Gmail draft stays unchanged. Review the
+copy before sending. Copying is blocked if attachment data is unavailable.
+
 The writing workspace supports multiple comma-separated recipients, Cc/Bcc,
 rich text (font, size, color, bold, italic, underline, strikethrough, alignment,
 lists and quotes), links, inline images, emoji, plain-text mode, and insertion

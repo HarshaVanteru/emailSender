@@ -5,14 +5,10 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.security import get_current_user
+from app.core.responses import private_response
 from app.features.google_login.user import User
 from app.features.drafts.schemas import DraftInput, ReviewedDraftSend
 from app.features.drafts.service import get_draft, list_drafts, save_draft, send_draft, discard_draft
-
-def private_response(response: Response):
-    response.headers["Cache-Control"] = "no-store"
-    response.headers["X-Content-Type-Options"] = "nosniff"
-
 
 router = APIRouter(prefix="/accounts/{account_id}/drafts", tags=["drafts"], dependencies=[Depends(private_response)])
 DraftId = Annotated[str, Path(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")]

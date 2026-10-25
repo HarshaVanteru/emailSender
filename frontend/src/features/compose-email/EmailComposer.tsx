@@ -163,6 +163,17 @@ export function EmailComposer({ draft, signature = '', onChangeDraft, onResetDra
     if (hasContent && !window.confirm('Clear the editor? A saved Gmail draft will remain in Gmail.')) return;
     clearLocal();
   }
+  function createEditableCopy() {
+    if (!loadedDraft || busy || saving.current) return;
+    if (loadedDraft.attachments.some(item => item.data === null)) {
+      setError('Some attachments could not be loaded. Open the original in Gmail to download them before making a copy.');
+      return;
+    }
+    if (!window.confirm('Create a new draft using the displayed text, recipients, and attachments? Original formatting, sender, reply headers, and threading will not be copied. The original Gmail draft will remain unchanged.')) return;
+    onChangeDraft({ body_html: null });
+    setLoadedDraft(null); setSavedKey(''); setViewMode('edit'); setAutosave(false); setError('');
+    setNotice('Editable copy created. Review the recipients, message, and attachments before sending. The original Gmail draft is unchanged.');
+  }
   async function discard() {
     if (busy || saving.current || !window.confirm(loadedDraft ? 'Permanently discard this Gmail draft and clear the editor?' : 'Discard this unsaved draft?')) return;
     setIsLoadingDrafts(true); setError('');
@@ -256,7 +267,7 @@ export function EmailComposer({ draft, signature = '', onChangeDraft, onResetDra
           : selected && <a href={getGmailAuthUrl(true, false, false, true)}>Enable draft autosave</a>}
       </div>
       {gmailDrafts.length > 0 && <div aria-label="Gmail drafts" className="compose-draft-list">{gmailDrafts.map(item => <button key={item.id} type="button" disabled={busy || isSaving} onClick={() => { void openDraft(item.id); }}>{item.subject || '(No subject)'} - {item.to || '(No recipient)'}</button>)}</div>}
-      {loadedDraft?.can_edit === false && <p className="compose-feedback">This external draft contains content this editor cannot preserve. <a href="https://mail.google.com/mail/u/0/#drafts" target="_blank" rel="noopener noreferrer">Open in Gmail</a></p>}
+      {loadedDraft?.can_edit === false && <div className="compose-feedback">This draft contains content this editor cannot preserve. Create an editable copy to send from here, or open the original in Gmail. <button type="button" disabled={busy || isSaving} onClick={createEditableCopy}>Create editable copy</button> <a href="https://mail.google.com/mail/u/0/#drafts" target="_blank" rel="noopener noreferrer">Open in Gmail</a></div>}
       <div className="writing-canvas flex-1 overflow-y-auto select-text" onDragOver={event => { event.preventDefault(); }} onDrop={event => { event.preventDefault(); attach(Array.from(event.dataTransfer.files)); }}>
         <div className="email-paper space-y-2.5">
           <div className="composer-field flex items-center gap-2"><label htmlFor="recipient" className="field-label">To</label><input id="recipient" type="email" multiple required={!draft.cc && !draft.bcc} autoComplete="email" autoCapitalize="none" spellCheck={false} value={draft.to} placeholder="Recipients, separated by commas" disabled={readonly} onChange={event => update({ to: event.target.value })} className="flex-1 min-w-0" /><button type="button" aria-expanded={showCc || Boolean(draft.cc)} onClick={() => setShowCc(value => !value)}>Cc</button><button type="button" aria-expanded={showBcc || Boolean(draft.bcc)} onClick={() => setShowBcc(value => !value)}>Bcc</button></div>

@@ -5,7 +5,7 @@ from langchain_core.tools import tool
 from langchain_groq import ChatGroq
 
 from app.core.config import GROQ_API_KEY
-from app.features.ai_assistant.schemas import ChatMessage, CopilotResponse, GeneratedEmail
+from app.features.ai_assistant.schemas import ChatMessage, CopilotResponse
 
 SYSTEM_PROMPT = """
 You are an expert AI email assistant writing professional, human-sounding emails on behalf of the user.

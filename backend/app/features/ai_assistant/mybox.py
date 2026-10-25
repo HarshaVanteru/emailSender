@@ -15,7 +15,7 @@ from app.core.database import SessionLocal
 from app.features.google_login.models import ConnectedAccount
 from app.features.mailbox.models import EmailMessage, MessageTriage
 from app.features.mailbox.reader import has_label
-from app.features.drafts.service import PlainText
+from app.integrations.gmail.text import html_to_text
 from app.features.mail_sync.service import utcnow
 
 SYSTEM = """Classify an incoming email for its recipient. Return only the requested JSON.
@@ -64,7 +64,7 @@ def claim_message(db):
     result.updated_at = now
     text = row.body_text or ""
     if not text and row.body_html:
-        parser = PlainText(); parser.feed(row.body_html[:12000]); text = "".join(parser.parts)
+        text = html_to_text(row.body_html[:12000])
     source = {"from": (row.from_address or "")[:320], "subject": (row.subject or "")[:600],
               "text": (text or row.snippet or "")[:6000]}
     claim = (row.id, row.account_id, result.lease_token, source)

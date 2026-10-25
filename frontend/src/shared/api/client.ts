@@ -10,7 +10,18 @@ export function getAuthHeaders(): Record<string, string> {
   return token ? { 'Authorization': `Bearer ${token}` } : {};
 }
 
-export async function mailboxRequest<T>(path: string, signal?: AbortSignal, method = 'GET', body?: object): Promise<T> {
+export class ApiError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
+export async function apiRequest<T>(path: string, signal?: AbortSignal, method = 'GET', body?: object,
+  errorMessage = 'Could not load your mail. Please try again.'): Promise<T> {
   const response = await fetch(apiUrl(path), { headers: { ...getAuthHeaders(), ...(body ? { 'Content-Type': 'application/json' } : {}) },
     signal, method, ...(body ? { body: JSON.stringify(body) } : {}) });
   const data = await response.json().catch(() => ({}));
@@ -19,8 +30,8 @@ export async function mailboxRequest<T>(path: string, signal?: AbortSignal, meth
     return { id: data.detail.job_id, status: 'queued', error_code: 'queue_unavailable' } as T;
   }
   if (!response.ok) {
-    if (response.status === 401) throw new Error('Your session expired. Reconnect Gmail to continue.');
-    throw new Error(typeof data.detail === 'string' ? data.detail : data.detail?.message || 'Could not load your mail. Please try again.');
+    if (response.status === 401) throw new ApiError('Your session expired. Reconnect Gmail to continue.', response.status);
+    throw new ApiError(typeof data.detail === 'string' ? data.detail : data.detail?.message || errorMessage, response.status);
   }
   return data;
 }

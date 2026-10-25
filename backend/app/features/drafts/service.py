@@ -5,7 +5,6 @@ import hashlib
 import json
 from email import message_from_bytes, policy
 from email.utils import getaddresses
-from html.parser import HTMLParser
 
 from fastapi import HTTPException
 from googleapiclient.errors import HttpError
@@ -16,35 +15,13 @@ from app.core.config import GMAIL_COMPOSE_SCOPE, GMAIL_MODIFY_SCOPE
 from app.features.mailbox.models import AuditLog
 from app.features.google_login.accounts import credentials_for_account
 from app.integrations.gmail.client import gmail_service
+from app.integrations.gmail.text import html_to_text
 from app.features.mail_sync.service import owned_account, utcnow
 from app.workers.rate_limit import GmailRateLimiter
 
 COMPOSE_SCOPES = {GMAIL_COMPOSE_SCOPE, GMAIL_MODIFY_SCOPE, "https://mail.google.com/"}
 MAX_RAW_BYTES = 36 * 1024 * 1024
 MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
-
-
-class PlainText(HTMLParser):
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.parts = []
-        self.hidden = 0
-
-    def handle_starttag(self, tag, attrs):
-        if tag in ("script", "style"):
-            self.hidden += 1
-        if tag in ("p", "div", "br", "li"):
-            self.parts.append("\n")
-
-    def handle_endtag(self, tag):
-        if tag in ("script", "style"):
-            self.hidden = max(0, self.hidden - 1)
-        if tag in ("p", "div", "li"):
-            self.parts.append("\n")
-
-    def handle_data(self, data):
-        if not self.hidden:
-            self.parts.append(data)
 
 
 def check_draft_access(account):
@@ -73,7 +50,7 @@ def provider_id(value):
     return value
 
 
-def draft_details(result):
+def draft_details(result, account_email=None):
     draft_id = provider_id(result.get("id"))
     encoded = result.get("message", {}).get("raw")
     if not isinstance(encoded, str) or len(encoded) > MAX_RAW_BYTES * 4 // 3 + 8:
@@ -89,9 +66,7 @@ def draft_details(result):
     html = message.get_body(preferencelist=("html",))
     text = plain.get_content() if plain else ""
     if not plain and html:
-        parser = PlainText()
-        parser.feed(html.get_content())
-        text = "".join(parser.parts).strip()
+        text = html_to_text(html.get_content()).strip()
     body_html = html.get_content() if html else None
     for inline in message.walk():
         cid = str(inline.get("Content-ID", "")).strip("<>")
@@ -109,11 +84,16 @@ def draft_details(result):
     cc = str(message.get("Cc", ""))
     bcc = str(message.get("Bcc", ""))
     addresses = getaddresses([recipients])
+    senders = getaddresses(message.get_all("From", []))
+    sender_matches = (not message.get("From") or (
+        account_email and len(senders) == 1
+        and senders[0][1].casefold() == account_email.casefold()))
     app_draft = message.get('X-Email-Studio-Draft') == '1'
     editable = (bool(plain) and (app_draft or not html) and (app_draft or len(addresses) <= 1)
                 and (app_draft or not addresses or addresses[0][1] == recipients)
-                and (app_draft or (not cc and not bcc)) and not message.get('Reply-To') and not message.get('From')
-                and all(len(message.get_all(name, [])) <= 1 for name in ("To", "Cc", "Bcc", "Subject"))
+                and (app_draft or (not cc and not bcc)) and not message.get('Reply-To') and sender_matches
+                and not message.get('In-Reply-To') and not message.get('References')
+                and all(len(message.get_all(name, [])) <= 1 for name in ("To", "Cc", "Bcc", "Subject", "From"))
                 and (app_draft or len(attachments) <= 1) and all(item["data"] is not None for item in attachments))
     return {"id": draft_id, "to": recipients, "cc": cc, "bcc": bcc,
             "subject": str(message.get("Subject", "")),
@@ -140,7 +120,8 @@ def get_draft(db, user_id, account_id, draft_id, service=None, limiter=None):
         raise provider_error(exc) from None
     if result.get("id") != draft_id:
         raise HTTPException(502, "Gmail returned a different draft. Refresh your draft list.")
-    return draft_details(result)
+    account = owned_account(db, user_id, account_id)
+    return draft_details(result, account.gmail_email)
 
 
 def list_drafts(db, user_id, account_id, page_token=None, service=None, limiter=None):

@@ -1,29 +1,14 @@
 import type { SendEmailPayload, SendEmailResponse, ThreadComposeMode, ThreadComposePreview, ThreadSendPayload, ThreadSendResponse } from './types';
-import { apiUrl, getAuthHeaders, mailboxRequest } from '../../shared/api/client';
+import { apiRequest } from '../../shared/api/client';
 
 export const fetchThreadCompose = (accountId: number, messageId: number, mode: ThreadComposeMode) =>
-  mailboxRequest<ThreadComposePreview>(`accounts/${accountId}/messages/${messageId}/compose?mode=${mode}`);
+  apiRequest<ThreadComposePreview>(`accounts/${accountId}/messages/${messageId}/compose?mode=${mode}`);
 
 export const sendThreadMessage = (accountId: number, messageId: number, payload: ThreadSendPayload) =>
-  mailboxRequest<ThreadSendResponse>(`accounts/${accountId}/messages/${messageId}/send`, undefined, 'POST', payload);
+  apiRequest<ThreadSendResponse>(`accounts/${accountId}/messages/${messageId}/send`, undefined, 'POST', payload);
 
-export async function sendEmail(payload: SendEmailPayload): Promise<SendEmailResponse> {
-  const res = await fetch(apiUrl('gmail/send'), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...getAuthHeaders()
-    },
-    body: JSON.stringify(payload),
-  });
-
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(data.detail || `Email dispatch failed with HTTP ${res.status}`);
-  }
-
-  return data;
-}
+export const sendEmail = (payload: SendEmailPayload) =>
+  apiRequest<SendEmailResponse>('gmail/send', undefined, 'POST', payload, 'Email dispatch failed. Check Gmail Sent before trying again.');
 
 export function readFileAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {

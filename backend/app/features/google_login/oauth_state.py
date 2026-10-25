@@ -2,17 +2,14 @@ import hashlib
 import json
 import secrets
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
 from sqlalchemy.orm import Session
 
 from app.core.config import GMAIL_LEGACY_SCOPES, GMAIL_SCOPES, OAUTH_STATE_TTL_SECONDS
 from app.core.token_crypto import decrypt, encrypt
+from app.core.time import utcnow as now
 from app.features.google_login.models import OAuthAttempt
-
-
-def now():
-    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def digest(value: str) -> str:

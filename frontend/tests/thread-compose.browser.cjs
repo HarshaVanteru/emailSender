@@ -25,6 +25,8 @@ const assert = require('node:assert/strict');
         else if (path.endsWith('/accounts')) body = [{ id: 1, email: 'owner@example.com', is_connected: true,
           mailbox_access: true, modify_access: false, requires_reauth: false }];
         else if (path.endsWith('/labels')) body = [];
+        else if (path.endsWith('/sync-jobs')) body = [];
+        else if (path.endsWith('/threads/1/ai')) body = [];
         else if (path.endsWith('/emails')) body = { items: [summary], next_page_token: null };
         else if (path.endsWith('/threads/1')) body = { id: 1, account_id: 1, subject: 'Project update', items: [detail], next_page_token: null };
         else if (path.endsWith('/messages/1/compose')) {

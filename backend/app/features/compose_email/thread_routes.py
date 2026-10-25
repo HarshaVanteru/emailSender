@@ -1,18 +1,14 @@
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.security import get_current_user
+from app.core.responses import private_response
 from app.features.google_login.user import User
 from app.features.compose_email.thread_schemas import ThreadSend
 from app.features.compose_email.thread_service import prepare, send
-
-
-def private_response(response: Response):
-    response.headers['Cache-Control'] = 'no-store'
-    response.headers['X-Content-Type-Options'] = 'nosniff'
 
 
 router = APIRouter(prefix='/accounts/{account_id}/messages/{message_id}', tags=['thread-compose'],

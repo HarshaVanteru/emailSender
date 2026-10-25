@@ -3,11 +3,11 @@ import { Inbox, Send, FileText, Search, PenLine, Mail, Paperclip, Star, ChevronD
 import { fetchConnectedAccounts, getGmailAuthUrl } from '../google-login/api';
 import { fetchLabels, fetchMail } from './api';
 import { watchMailbox } from '../mail-sync/realtime';
-import { fetchRecentSyncJobs, fetchSyncJob } from '../mail-sync/api';
+import { fetchRecentSyncJobs, fetchSyncJob, startSync } from '../mail-sync/api';
 import type { ConnectedAccount } from '../google-login/types';
 import type { MailDetail, MailLabel, MailPage, MailSummary } from './types';
 import type { SyncJob } from '../mail-sync/types';
-import { mailboxRequest } from '../../shared/api/client';
+import { apiRequest } from '../../shared/api/client';
 import { ThreadReader } from './ThreadReader';
 import './mailbox.css';
 
@@ -46,10 +46,13 @@ function AccountMailbox({ account, accounts, onAccount, onCompose, onAccountsCha
   const [labelError, setLabelError] = useState('');
   const [revision, setRevision] = useState(0);
   const [job, setJob] = useState<SyncJob | null>(null);
+  const [startingSync, setStartingSync] = useState(false);
+  const [syncError, setSyncError] = useState('');
+  const startingSyncRef = useRef(false);
   useEffect(() => {
     if (label !== 'MYBOX') return;
     const request = new AbortController();
-    void mailboxRequest<{ enabled: boolean; configured: boolean; pending: number; failed: number }>(`accounts/${account.id}/mybox-status`, request.signal).then(result => { if (!request.signal.aborted) setMyboxStatus(result); }).catch(() => { if (!request.signal.aborted) setMyboxStatus(null); });
+    void apiRequest<{ enabled: boolean; configured: boolean; pending: number; failed: number }>(`accounts/${account.id}/mybox-status`, request.signal).then(result => { if (!request.signal.aborted) setMyboxStatus(result); }).catch(() => { if (!request.signal.aborted) setMyboxStatus(null); });
     return () => request.abort();
   }, [account.id, label, revision]);
   useEffect(() => {
@@ -87,6 +90,14 @@ function AccountMailbox({ account, accounts, onAccount, onCompose, onAccountsCha
     return () => request.abort();
   }, [job?.id, job?.status, onAccountsChange]);
   const pending = job?.status === 'queued' || job?.status === 'running';
+  async function syncMail() {
+    if (startingSyncRef.current || pending || !account.is_connected || !account.mailbox_access) return;
+    startingSyncRef.current = true;
+    setStartingSync(true); setSyncError('');
+    try { setJob(await startSync(account.id)); }
+    catch (reason) { setSyncError(reason instanceof Error ? reason.message : 'Could not start mailbox sync.'); }
+    finally { startingSyncRef.current = false; setStartingSync(false); }
+  }
   const jobId = job?.id;
   useEffect(() => {
     if (!pending || !jobId) return;
@@ -119,9 +130,14 @@ function AccountMailbox({ account, accounts, onAccount, onCompose, onAccountsCha
       <div className="mail-sidebar-note"><span className="eyebrow">ROOM TO FOCUS</span><p>Read here. Find the right words in your writing workspace.</p></div>
     </aside>
     <section className="mail-main" aria-label="Mailbox">
+      <div className="mail-toolbar"><h1>{title}</h1><button type="button" className="mail-button" disabled={startingSync || pending || !account.is_connected || !account.mailbox_access} onClick={() => { void syncMail(); }}>{startingSync || pending ? 'Syncing…' : 'Sync mail'}</button></div>
+      <div className="mail-sync-status" role="status"><span>{pending
+        ? job?.error_code === 'queue_unavailable' ? 'Sync saved. Waiting for the sync service to recover.' : job?.kind === 'reconcile' ? 'Checking cached mail against Gmail…' : 'Synchronizing mailbox…'
+        : job?.status === 'succeeded' ? 'Mailbox updated.' : job?.status === 'failed' ? 'Mailbox sync failed. Try syncing again.' : 'Your cached mailbox is ready.'}</span>{account.last_synced_at && <span> Last synced: {new Date(account.last_synced_at).toLocaleString()}</span>}</div>
+      {syncError && <p className="mail-notice" role="alert">{syncError}</p>}
       {(!account.is_connected || !account.mailbox_access) && <div className="mail-notice">{!account.is_connected ? 'Reconnect Gmail to update your mailbox.' : 'Allow read access to bring your Gmail messages here.'} <a href={getGmailAuthUrl(account.requires_reauth, true)}>{account.is_connected ? 'Enable inbox access' : 'Reconnect Gmail'}</a></div>}
       {account.is_connected && account.mailbox_access && !account.modify_access && <div className="mail-notice">To mark, star, archive or trash messages, allow Gmail change access. <a href={getGmailAuthUrl(false, false, true)}>Enable mail actions</a></div>}
-      {label === 'MYBOX' && <div className="mybox-notice"><strong>Mybox</strong><p>AI-reviewed incoming mail, with suspected spam excluded. Messages awaiting review stay available in Inbox.</p>{myboxStatus && <p role="status">{!myboxStatus.enabled ? 'Automatic AI review is turned off.' : !myboxStatus.configured ? 'Configure the AI provider to start automatic review.' : `${myboxStatus.pending} messages awaiting AI review.`}{myboxStatus.failed > 0 && <> {myboxStatus.failed} reviews could not finish. <button className="mail-text-button" onClick={() => { void mailboxRequest(`accounts/${account.id}/mybox-retry`, undefined, 'POST').then(() => setRevision(value => value + 1)).catch(() => setLabelError('Could not retry AI review. Please try again.')); }}>Retry reviews</button></>}</p>}<div className="mybox-legend" role="group" aria-label="Filter by importance">{(['critical', 'high', 'normal', 'low'] as const).map(level => <button type="button" key={level} className={`mail-importance mybox-filter ${level}`} aria-pressed={importance === level} onClick={() => setImportance(current => current === level ? null : level)}>{level[0].toUpperCase() + level.slice(1)}</button>)}</div></div>}
+      {label === 'MYBOX' && <div className="mybox-notice"><strong>Mybox</strong><p>AI-reviewed incoming mail, with suspected spam excluded. Messages awaiting review stay available in Inbox.</p>{myboxStatus && <p role="status">{!myboxStatus.enabled ? 'Automatic AI review is turned off.' : !myboxStatus.configured ? 'Configure the AI provider to start automatic review.' : `${myboxStatus.pending} messages awaiting AI review.`}{myboxStatus.failed > 0 && <> {myboxStatus.failed} reviews could not finish. <button className="mail-text-button" onClick={() => { void apiRequest(`accounts/${account.id}/mybox-retry`, undefined, 'POST').then(() => setRevision(value => value + 1)).catch(() => setLabelError('Could not retry AI review. Please try again.')); }}>Retry reviews</button></>}</p>}<div className="mybox-legend" role="group" aria-label="Filter by importance">{(['critical', 'high', 'normal', 'low'] as const).map(level => <button type="button" key={level} className={`mail-importance mybox-filter ${level}`} aria-pressed={importance === level} onClick={() => setImportance(current => current === level ? null : level)}>{level[0].toUpperCase() + level.slice(1)}</button>)}</div></div>}
       <form className="mail-search" role="search" onSubmit={event => { event.preventDefault(); setQuery(search.trim()); }}><Search size={17} aria-hidden="true" /><label htmlFor="mail-search-query">Search mail</label><input id="mail-search-query" name="q" type="search" autoCapitalize="off" autoCorrect="off" spellCheck={false} aria-label="Search cached mail" placeholder="Search sender, subject, or message…" value={search} maxLength={200} onChange={event => setSearch(event.target.value)} /><button type="submit">Search</button>{query && <button type="button" onClick={() => { setSearch(''); setQuery(''); }}>Clear</button>}</form>
       <div className="mail-filter-bar"><span>{query ? `Results for “${query}” in ${title}` : 'Recent synchronized messages'}</span><label><input type="checkbox" checked={unread} onChange={event => setUnread(event.target.checked)} /> Unread only</label></div>
       {label === 'DRAFT' && <p className="mail-notice">Drafts saved in Gmail appear here for reading. Your writing workspace draft stays separate.</p>}

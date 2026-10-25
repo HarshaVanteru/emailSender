@@ -1,32 +1,44 @@
-# React + TypeScript + Vite
+# emailSender frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+React and TypeScript Gmail workspace, built with Vite and Tailwind CSS.
+See the [project setup guide](../backend/README.md) for backend services,
+Google OAuth, environment configuration, and browser test scenarios.
 
-Currently, two official plugins are available:
+## Development
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+Use Node.js 22.12+ and run from the project root:
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```powershell
+npm --prefix frontend ci
+npm --prefix frontend run dev -- --port 5173 --strictPort
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+Vite proxies `/api` to the backend. `VITE_API_BASE_URL` overrides the backend
+origin and is embedded at build time.
+
+## Source layout
+
+- `src/app/`: application shell and workspace state.
+- `src/features/`: mailbox, compose, drafts, Google login, AI, profile, and sync.
+- `src/shared/api/client.ts`: authenticated JSON requests and API errors.
+- `src/shared/api/apiUrl.ts`: API URL normalization.
+- `src/shared/components/`: shared UI.
+
+Keep endpoints and types in their feature folder. Use `apiRequest` for JSON
+requests so authentication, response parsing, and errors stay consistent.
+
+## Verification
+
+From `frontend/`:
+
+```powershell
+npm run build
+npm run lint
+node --test tests/*.test.mjs
+```
+
+Browser checks in `tests/*.browser.cjs` use Playwright with Microsoft Edge.
+Serve the production build on port 4174, or set `APP_URL` to a local server.
+Set `PLAYWRIGHT_MODULE` if Playwright is installed outside this project.
+Most browser checks mock provider requests; `live-readonly.browser.cjs`
+is a separate live-account diagnostic.

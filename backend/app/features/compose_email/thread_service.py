@@ -13,7 +13,7 @@ from sqlalchemy.exc import OperationalError
 from app.core.config import GMAIL_COMPOSE_SCOPE, GMAIL_MODIFY_SCOPE
 from app.features.mailbox.models import AuditLog, EmailAttachment, EmailMessage, EmailThread
 from app.features.google_login.accounts import credentials_for_account
-from app.features.drafts.service import PlainText
+from app.integrations.gmail.text import html_to_text
 from app.integrations.gmail.client import gmail_service
 from app.features.mail_sync.service import owned_account, utcnow
 from app.workers.rate_limit import GmailRateLimiter
@@ -88,9 +88,7 @@ def reply_subject(subject):
 def forward_body(message):
     body = message.body_text or ''
     if not body and message.body_html:
-        parser = PlainText()
-        parser.feed(message.body_html[:100_000])
-        body = ''.join(parser.parts).strip()
+        body = html_to_text(message.body_html[:100_000]).strip()
     body = body[:20_000]
     sent = datetime.fromtimestamp(message.internal_date / 1000, timezone.utc).strftime('%a, %d %b %Y %H:%M UTC')
     to = ', '.join(item.get('email', '') for item in message.to_addresses or [])

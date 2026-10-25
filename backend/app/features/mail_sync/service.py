@@ -6,12 +6,12 @@ changes and its cursor. Provider failures roll back both, then mark the job fail
 import json
 from contextlib import contextmanager
 from contextvars import ContextVar
-from datetime import datetime, timezone
 
 from fastapi import HTTPException
 from googleapiclient.errors import HttpError
 from sqlalchemy.exc import OperationalError
 
+from app.core.time import utcnow
 from app.features.google_login.models import ConnectedAccount
 from app.features.mailbox.models import AuditLog, EmailAttachment, EmailLabel, EmailMessage, EmailThread, MessageLabel, SyncJob
 from app.features.google_login.accounts import credentials_for_account
@@ -46,10 +46,6 @@ class SyncFailure(Exception):
 
 class HistoryExpired(Exception):
     pass
-
-
-def utcnow():
-    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def owned_account(db, user_id, account_id, lock=False):

@@ -59,9 +59,34 @@ const assert = require('node:assert/strict');
       await page.clock.runFor(10000);
       await page.getByText('Your email was sent successfully.').waitFor();
       assert.equal(sends, 1);
+
+      // Unsupported originals stay untouched; an explicit copy can be sent.
+      stored = { id: 'draft1', to: 'receiver@example.com', cc: '', bcc: '', subject: 'External draft',
+        body: 'Text from the external draft.', body_html: null, attachments: [], can_edit: false, content_hash: 'b'.repeat(64) };
+      const original = stored;
+      await page.getByRole('button', { name: 'Gmail drafts' }).click();
+      await page.getByRole('button', { name: /External draft.*receiver@example.com/ }).click();
+      assert.equal(await page.getByRole('button', { name: 'Send email' }).isDisabled(), true);
+      page.once('dialog', dialog => dialog.dismiss());
+      await page.getByRole('button', { name: 'Create editable copy' }).click();
+      assert.equal(await page.getByRole('button', { name: 'Send email' }).isDisabled(), true);
+      page.once('dialog', dialog => dialog.accept());
+      await page.getByRole('button', { name: 'Create editable copy' }).click();
+      assert.equal(await page.getByRole('button', { name: 'Send email' }).isEnabled(), true);
+      assert.equal(await page.getByLabel('Message', { exact: true }).innerText(), original.body);
+      assert.equal(stored, original);
+      assert.equal(saves, 1);
+      await page.getByRole('button', { name: 'Send email' }).click();
+      await page.getByRole('dialog', { name: 'Review before sending' }).waitFor();
+      assert.equal(saves, 2);
+      assert.equal(sends, 1);
+      await page.getByRole('button', { name: 'Confirm send' }).click();
+      await page.clock.runFor(10000);
+      await page.getByText('Your email was sent successfully.').waitFor();
+      assert.equal(sends, 2);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
       await page.close();
-      console.log(`PASS ${width}px: Gmail draft save, reopen, review cancellation and confirmed send`);
+      console.log(`PASS ${width}px: Gmail drafts, reviewed sending, and explicit editable copies`);
     }
   } finally { await browser.close(); }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

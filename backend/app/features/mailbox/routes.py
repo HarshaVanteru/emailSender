@@ -1,20 +1,16 @@
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, ConfigDict, model_validator
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.security import get_current_user
+from app.core.responses import private_response
 from app.features.google_login.user import User
 from app.features.mailbox.schemas import MailDetail, MailLabel, MailPage, ThreadPage
 from app.features.mailbox import reader as mailbox_reader
 from app.features.mailbox.actions import change_message
-
-
-def private_response(response: Response):
-    response.headers["Cache-Control"] = "no-store"
-    response.headers["X-Content-Type-Options"] = "nosniff"
 
 
 router = APIRouter(tags=["mailbox"], dependencies=[Depends(private_response)])

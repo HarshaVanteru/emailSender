@@ -1,5 +1,5 @@
 import type { ConnectedAccount } from './types';
-import { apiUrl, getAuthHeaders } from '../../shared/api/client';
+import { apiUrl, apiRequest } from '../../shared/api/client';
 
 export function getGmailAuthUrl(renewConsent = false, mailboxAccess = false, modifyAccess = false, draftAccess = false): string {
   const params = new URLSearchParams();
@@ -10,18 +10,8 @@ export function getGmailAuthUrl(renewConsent = false, mailboxAccess = false, mod
   return apiUrl('auth/google') + (params.size ? `?${params}` : '');
 }
 
-export async function fetchConnectedAccounts(signal?: AbortSignal): Promise<ConnectedAccount[]> {
-  const response = await fetch(apiUrl('accounts'), { headers: getAuthHeaders(), signal });
-  if (!response.ok) throw new Error('Could not load Gmail connections. Please try again.');
-  return response.json();
-}
+export const fetchConnectedAccounts = (signal?: AbortSignal) =>
+  apiRequest<ConnectedAccount[]>('accounts', signal, 'GET', undefined, 'Could not load Gmail connections. Please try again.');
 
-export async function disconnectAccount(accountId: number): Promise<void> {
-  const response = await fetch(apiUrl(`accounts/${accountId}`), {
-    method: 'DELETE', headers: getAuthHeaders(),
-  });
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
-    throw new Error(data.detail || 'Could not disconnect Gmail. Please try again.');
-  }
-}
+export const disconnectAccount = (accountId: number) =>
+  apiRequest<void>(`accounts/${accountId}`, undefined, 'DELETE', undefined, 'Could not disconnect Gmail. Please try again.');

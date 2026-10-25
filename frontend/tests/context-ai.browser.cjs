@@ -51,11 +51,10 @@ const assert = require('node:assert/strict');
         await route.fulfill({ status, headers, json: body });
       });
       await page.goto((process.env.APP_URL || 'http://127.0.0.1:4174') + '/#token=test-session');
-      const header = page.locator('.studio-header');
-      await header.getByRole('heading', { name: 'Inbox', exact: true }).waitFor();
-      assert.equal(await header.getByRole('button', { name: 'Sync mail', exact: true }).count(), 1);
-      await header.getByText(/Last synced/).waitFor();
-      assert.equal(await page.locator('.mail-main .mail-toolbar, .mail-main .mail-sync-status').count(), 0);
+      const mailbox = page.getByRole('region', { name: 'Mailbox', exact: true });
+      await mailbox.getByRole('heading', { name: 'Inbox', exact: true }).waitFor();
+      assert.equal(await page.getByRole('button', { name: 'Sync mail', exact: true }).count(), 1);
+      await mailbox.getByText(/Last synced/).waitFor();
       await page.getByRole('button', { name: /Project update/ }).click();
       await page.getByRole('button', { name: 'Open AI chat' }).click();
       await page.getByRole('dialog', { name: 'Email conversation chat' }).waitFor();
@@ -71,6 +70,10 @@ const assert = require('node:assert/strict');
       await dialog.getByRole('button', { name: 'Review message' }).click();
       assert.equal(sends, 0);
       await dialog.getByRole('button', { name: 'Cancel' }).click();
+      // Opening the reply dialog dismisses the floating chat on focus loss.
+      if (await page.getByRole('button', { name: 'Open AI chat' }).getAttribute('aria-expanded') === 'false') {
+        await page.getByRole('button', { name: 'Open AI chat' }).click();
+      }
       await page.getByLabel('Rewrite text').check();
       await page.getByLabel('Text to rewrite').fill('Please send notes.');
       await page.getByRole('button', { name: 'Generate rewrite text' }).click();

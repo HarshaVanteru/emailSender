@@ -1,18 +1,12 @@
-from typing import Annotated
-
-from fastapi import APIRouter, Depends, Path, Response
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.security import get_current_user
+from app.core.responses import private_response
 from app.features.google_login.user import User
 from app.features.ai_assistant.context_schemas import AiOperation, ContextAiRequest, StoredSuggestion
 from app.features.ai_assistant.context_service import generate, list_suggestions
-
-
-def private_response(response: Response):
-    response.headers['Cache-Control'] = 'no-store'
-    response.headers['X-Content-Type-Options'] = 'nosniff'
 
 
 router = APIRouter(prefix='/accounts/{account_id}/threads/{thread_id}/ai', tags=['context-ai'],
