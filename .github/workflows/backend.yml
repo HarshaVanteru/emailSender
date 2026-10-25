@@ -16,6 +16,12 @@ on:
       - ".github/workflows/backend.yml"
 
   workflow_dispatch:
+    inputs:
+      baseline_legacy_database:
+        description: "One-time legacy setup: confirm database backup is complete and worker writes are paused"
+        type: boolean
+        required: false
+        default: false
 
 # One deploy at a time per branch.
 concurrency:
@@ -108,6 +114,7 @@ jobs:
       GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
       GHCR_PAT: ${{ secrets.GHCR_PAT }}
       IMAGE: ${{ needs.build.outputs.image }}:${{ github.sha }}
+      BASELINE_LEGACY_DATABASE: ${{ github.event_name == 'workflow_dispatch' && inputs.baseline_legacy_database && 'true' || 'false' }}
 
     steps:
       - name: Set up SSH key
@@ -126,9 +133,9 @@ jobs:
             ServerAliveInterval 30
           EOF
 
-      - name: Pull new image and restart API
+      - name: Pull image, migrate database, and restart API
         run: |
-          ssh deploy "BACKEND_IMAGE='$IMAGE' GHCR_USERNAME='$GHCR_USERNAME' GHCR_PAT='$GHCR_PAT' DEPLOY_DIR='$DEPLOY_DIR' SERVICE_NAME='$SERVICE_NAME' bash -s" <<'REMOTE'
+          ssh deploy "BACKEND_IMAGE='$IMAGE' GHCR_USERNAME='$GHCR_USERNAME' GHCR_PAT='$GHCR_PAT' DEPLOY_DIR='$DEPLOY_DIR' SERVICE_NAME='$SERVICE_NAME' BASELINE_LEGACY_DATABASE='$BASELINE_LEGACY_DATABASE' bash -s" <<'REMOTE'
           set -euo pipefail
           cd "$DEPLOY_DIR"
 
@@ -142,9 +149,35 @@ jobs:
           mv .env.next .env
 
           docker compose pull "$SERVICE_NAME"
-          docker compose pull "$SERVICE_NAME"
+          docker compose stop "$SERVICE_NAME"
+
+          # Explicit one-time adoption of the original users-only database.
+          # Refuse to stamp a versioned or partially migrated database.
+          if [ "$BASELINE_LEGACY_DATABASE" = "true" ]; then
+            docker compose run --rm --no-deps "$SERVICE_NAME" python -c '
+          from alembic import command
+          from alembic.config import Config
+          from alembic.migration import MigrationContext
+          from sqlalchemy import create_engine, inspect
+          from app.core.config import DATABASE_URL
+
+          engine = create_engine(DATABASE_URL)
+          with engine.connect() as connection:
+              inspector = inspect(connection)
+              revisions = MigrationContext.configure(connection).get_current_heads()
+              tables = set(inspector.get_table_names()) - {"alembic_version"}
+              expected = {"id", "email", "name", "google_token", "signature", "preferences", "bio"}
+              if revisions or tables != {"users"}:
+                  raise SystemExit("Refusing legacy stamp: database must be unversioned with only the users table.")
+              columns = {column["name"] for column in inspector.get_columns("users")}
+              if columns != expected:
+                  raise SystemExit("Refusing legacy stamp: users columns do not match migration 0001.")
+          command.stamp(Config("alembic.ini"), "0001")
+          '
+          fi
+
           docker compose run --rm --no-deps "$SERVICE_NAME" python -m alembic upgrade head
-          docker compose up -d --remove-orphans
+          docker compose run --rm --no-deps "$SERVICE_NAME" python -m alembic current
           docker compose up -d --remove-orphans
           docker image prune -f
           docker compose ps
