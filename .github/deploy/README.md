@@ -16,13 +16,16 @@ The API binds to `127.0.0.1:8000` for the existing nginx proxy by default.
 Set `API_BIND_ADDRESS`, `API_PORT` (host port), and `PORT` (container port) in
 `.env` if the production proxy uses another address or port.
 
-Deployment pulls images before downtime, then stops the API, scheduler, and all
+Deployment pulls images and verifies database connectivity before downtime,
+then stops the API, scheduler, and all
 current or retired mailbox workers in the existing Compose project. Workers get
 up to 31 minutes to finish their current task. Redis and any existing MySQL
 container stay up; their data volumes are retained. The script refuses ambiguous projects or unrelated services
 in the same project rather than stopping them.
 
-Alembic upgrades to `head`, including migration `0009`, while database writers
+The read-only connectivity check uses the exact migration image, credentials,
+and network. An unreachable database fails before any running writers are
+stopped. Alembic upgrades to `head`, including migration `0009`, while database writers
 are stopped. The manual legacy-baseline input retains the original users-only
 schema checks; it is unnecessary for an already-versioned database. Keep normal
 database backups before release migrations.
@@ -51,6 +54,12 @@ server-managed container in addition to the four application services. The
 runtime manifest declares its network external so it is not recreated or
 removed by the application deployment. An ambiguous MySQL network fails before
 any application writers are stopped. `DATABASE_URL` is retained unchanged.
+When that URL uses `host.docker.internal`, localhost, loopback, or `mysql`, the
+script sets `DATABASE_HOST_OVERRIDE` to the detected MySQL container name.
+The backend resolves that hostname directly on the preserved network, retaining
+the existing username, password, port, database name, and query options. Explicit
+external database URLs are not redirected. The override is shared by preflight,
+migrations, API, worker, and scheduler, and is persisted after successful migration.
 
 Do not use `--remove-orphans` for this production project: MySQL is intentionally
 outside the application manifest. The deployment script overrides automatic

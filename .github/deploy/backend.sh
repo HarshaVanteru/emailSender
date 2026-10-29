@@ -85,10 +85,20 @@ if (( ${#mysql_containers[@]} == 1 )); then
     echo "Cannot safely identify the existing MySQL network; no writers were stopped." >&2
     exit 1
   fi
+  mysql_host=$(docker inspect --format '{{.Name}}' "${mysql_containers[0]}")
+  mysql_host=${mysql_host#/}
+  if [[ ! "$mysql_host" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]]; then
+    echo "Invalid MySQL container hostname; no writers were stopped." >&2
+    exit 1
+  fi
+  export DATABASE_HOST_OVERRIDE="$mysql_host"
   printf '\nnetworks:\n  default:\n    external: true\n    name: %s\n' "$mysql_network" >> "$runtime_compose"
   "${compose[@]}" config --quiet
   echo "Preserving the existing MySQL container on network $mysql_network."
 fi
+# Use the same release image, network, credentials, and host override as the
+# migration and running services. This is read-only and precedes downtime.
+"${compose[@]}" run -T --rm --no-deps emailsender python - < "$release_dir/database_preflight.py"
 if (( ${#writers[@]} )); then
   docker stop --time 1860 "${writers[@]}"
 fi
@@ -123,8 +133,9 @@ fi
 # Publish configuration only after migrations succeed; never print .env.
 next_env=$(mktemp "$DEPLOY_DIR/.env.XXXXXX")
 chmod 600 "$next_env"
-awk '!/^BACKEND_IMAGE=/ && !/^COMPOSE_PROJECT_NAME=/' .env > "$next_env"
+awk '!/^BACKEND_IMAGE=/ && !/^COMPOSE_PROJECT_NAME=/ && !/^DATABASE_HOST_OVERRIDE=/' .env > "$next_env"
 printf '\nBACKEND_IMAGE=%s\nCOMPOSE_PROJECT_NAME=%s\n' "$BACKEND_IMAGE" "$project" >> "$next_env"
+printf 'DATABASE_HOST_OVERRIDE=%s\n' "${DATABASE_HOST_OVERRIDE:-}" >> "$next_env"
 mv -- "$next_env" .env
 if [[ -f compose.yaml ]]; then cp -- compose.yaml "$release_dir/compose.previous.yaml"; fi
 cp -- "$runtime_compose" compose.yaml

@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
+from app.core.database_url import resolve_database_url
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 
@@ -13,9 +14,9 @@ GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
 GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-DATABASE_URL = os.getenv(
+DATABASE_URL = resolve_database_url(os.getenv(
     "DATABASE_URL", "mysql+pymysql://root:password@host.docker.internal:3306/email_sender"
-)
+), os.getenv("DATABASE_HOST_OVERRIDE"))
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = "HS256"

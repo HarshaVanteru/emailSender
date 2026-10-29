@@ -21,6 +21,8 @@ if [[ "$1" == "ps" ]]; then
 elif [[ "$1" == "inspect" ]]; then
   if [[ "$*" == *NetworkSettings.Networks* ]]; then
     echo original-project_database
+  elif [[ "$*" == *'{{.Name}}'* ]]; then
+    echo /emailsender-mysql
   elif [[ "$*" == *Config.Labels* ]]; then
     case "${@: -1}" in
       old-api) echo emailsender ;;
@@ -36,6 +38,10 @@ elif [[ "$1" == "inspect" ]]; then
   fi
 elif [[ "$1" == "compose" ]]; then
   if [[ "$*" == *' pull' && "${SCENARIO:-}" == "pull-fails" ]]; then exit 9; fi
+  if [[ "$*" == *'emailsender python -' ]]; then
+    cat >/dev/null
+    if [[ "${SCENARIO:-}" == "database-unreachable" ]]; then exit 12; fi
+  fi
   if [[ "$*" == *'alembic upgrade head'* && "${SCENARIO:-}" == "migration-fails" ]]; then exit 10; fi
   if [[ "$*" == *' exec -T worker '* ]]; then
     cat >/dev/null
@@ -58,7 +64,7 @@ class DeploymentTests(unittest.TestCase):
         (deploy / "compose.yaml").write_text("previous-manifest\n")
         release = deploy / ".deploy" / "release"
         release.mkdir(parents=True)
-        for name in ("backend.sh", "compose.yaml"):
+        for name in ("backend.sh", "compose.yaml", "database_preflight.py"):
             shutil.copyfile(ROOT / ".github" / "deploy" / name, release / name)
         binary = work / "bin"
         binary.mkdir()
@@ -81,10 +87,12 @@ class DeploymentTests(unittest.TestCase):
         result, commands, deploy, release = self.run_deployment()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         pull = next(i for i, command in enumerate(commands) if command.endswith(" pull"))
+        preflight = next(i for i, command in enumerate(commands) if command.endswith("emailsender python -"))
         stop = next(i for i, command in enumerate(commands) if command.startswith("stop "))
         migrate = next(i for i, command in enumerate(commands) if "alembic upgrade head" in command)
         start = next(i for i, command in enumerate(commands) if " up -d " in command)
-        self.assertLess(pull, stop)
+        self.assertLess(pull, preflight)
+        self.assertLess(preflight, stop)
         self.assertLess(stop, migrate)
         self.assertLess(migrate, start)
         self.assertIn("old-maintenance", commands[stop])
@@ -97,6 +105,7 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual((release / "compose.previous.yaml").read_text(), "previous-manifest\n")
         self.assertIn("COMPOSE_PROJECT_NAME=original-project", (deploy / ".env").read_text())
         self.assertIn("DATABASE_URL=unchanged-placeholder", (deploy / ".env").read_text())
+        self.assertIn("DATABASE_HOST_OVERRIDE=emailsender-mysql", (deploy / ".env").read_text())
 
     def test_existing_mysql_container_and_network_survive_deployment(self):
         result, commands, deploy, _ = self.run_deployment()
@@ -113,6 +122,15 @@ class DeploymentTests(unittest.TestCase):
         self.assertIn("external: true", runtime)
         self.assertIn("name: original-project_database", runtime)
         self.assertIn("DATABASE_URL=unchanged-placeholder", (deploy / ".env").read_text())
+        self.assertIn("DATABASE_HOST_OVERRIDE=emailsender-mysql", (deploy / ".env").read_text())
+
+    def test_unreachable_database_fails_before_stopping_any_application(self):
+        result, commands, deploy, _ = self.run_deployment("database-unreachable")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(any(command.startswith(("stop ", "rm ")) for command in commands))
+        self.assertFalse(any("alembic upgrade head" in command for command in commands))
+        self.assertEqual((deploy / ".env").read_text(), self.original_env)
+        self.assertEqual((deploy / "compose.yaml").read_text(), "previous-manifest\n")
 
     def test_failed_pull_does_not_stop_running_services(self):
         result, commands, deploy, _ = self.run_deployment("pull-fails")

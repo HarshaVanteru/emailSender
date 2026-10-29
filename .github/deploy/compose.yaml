@@ -4,6 +4,7 @@ x-backend: &backend
   env_file: .env
   environment:
     REDIS_URL: redis://redis:6379/0
+    DATABASE_HOST_OVERRIDE: ${DATABASE_HOST_OVERRIDE:-}
     PORT: ${PORT:-8000}
   extra_hosts:
     - "host.docker.internal:host-gateway"
