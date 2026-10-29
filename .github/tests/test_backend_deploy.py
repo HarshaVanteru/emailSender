@@ -16,10 +16,12 @@ if [[ "$1" == "ps" ]]; then
   if [[ "$*" == *project.working_dir* ]]; then
     printf '%s\n' original-project
   else
-    printf '%s\n' old-api old-worker old-maintenance old-ai old-scheduler old-redis
+    printf '%s\n' old-api old-worker old-maintenance old-ai old-scheduler old-redis old-mysql
   fi
 elif [[ "$1" == "inspect" ]]; then
-  if [[ "$*" == *Config.Labels* ]]; then
+  if [[ "$*" == *NetworkSettings.Networks* ]]; then
+    echo original-project_database
+  elif [[ "$*" == *Config.Labels* ]]; then
     case "${@: -1}" in
       old-api) echo emailsender ;;
       old-worker) echo worker ;;
@@ -27,6 +29,7 @@ elif [[ "$1" == "inspect" ]]; then
       old-ai) echo ai-worker ;;
       old-scheduler) echo scheduler ;;
       old-redis) echo redis ;;
+      old-mysql) echo mysql ;;
     esac
   else
     printf '%s\n' "$BACKEND_IMAGE"
@@ -87,11 +90,28 @@ class DeploymentTests(unittest.TestCase):
         self.assertIn("old-maintenance", commands[stop])
         self.assertIn("old-ai", commands[stop])
         self.assertNotIn("old-redis", commands[stop])
-        self.assertIn("--remove-orphans --wait", commands[start])
+        self.assertIn("--wait", commands[start])
+        self.assertNotIn("--remove-orphans", commands[start])
         self.assertTrue(any("exec -T worker" in command for command in commands))
-        self.assertEqual((deploy / "compose.yaml").read_text(), (release / "compose.yaml").read_text())
+        self.assertEqual((deploy / "compose.yaml").read_text(), (release / "compose.runtime.yaml").read_text())
         self.assertEqual((release / "compose.previous.yaml").read_text(), "previous-manifest\n")
         self.assertIn("COMPOSE_PROJECT_NAME=original-project", (deploy / ".env").read_text())
+        self.assertIn("DATABASE_URL=unchanged-placeholder", (deploy / ".env").read_text())
+
+    def test_existing_mysql_container_and_network_survive_deployment(self):
+        result, commands, deploy, _ = self.run_deployment()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        mutations = [command for command in commands if command.startswith(("stop ", "rm ", "network ", "volume "))]
+        self.assertFalse(any("old-mysql" in command for command in mutations))
+        self.assertFalse(any("old-redis" in command for command in mutations))
+        self.assertFalse(any("--remove-orphans" in command or " down" in command for command in commands))
+        cleanup = next(command for command in commands if command.startswith("rm "))
+        self.assertIn("old-maintenance", cleanup)
+        self.assertIn("old-ai", cleanup)
+        self.assertNotIn("old-api", cleanup)
+        runtime = (deploy / "compose.yaml").read_text()
+        self.assertIn("external: true", runtime)
+        self.assertIn("name: original-project_database", runtime)
         self.assertIn("DATABASE_URL=unchanged-placeholder", (deploy / ".env").read_text())
 
     def test_failed_pull_does_not_stop_running_services(self):

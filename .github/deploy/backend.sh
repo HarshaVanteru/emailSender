@@ -26,8 +26,13 @@ if [[ ! "$project" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
   echo "Invalid Compose project name." >&2
   exit 1
 fi
+# Build a runtime manifest so an existing database network can be reused
+# without adding MySQL to the application services managed by this release.
+runtime_compose="$release_dir/compose.runtime.yaml"
+cp -- "$release_dir/compose.yaml" "$runtime_compose"
+export COMPOSE_REMOVE_ORPHANS=false
 compose=(docker compose --project-directory "$DEPLOY_DIR" --env-file "$DEPLOY_DIR/.env" \
-  --project-name "$project" -f "$release_dir/compose.yaml")
+  --project-name "$project" -f "$runtime_compose")
 export BACKEND_IMAGE
 "${compose[@]}" config --quiet
 
@@ -50,14 +55,40 @@ container_list=$(docker ps --filter "label=com.docker.compose.project=$project" 
 containers=()
 if [[ -n "$container_list" ]]; then mapfile -t containers <<< "$container_list"; fi
 writers=()
+retired=()
+mysql_containers=()
 for container in "${containers[@]}"; do
   service=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.service"}}' "$container")
   case "$service" in
-    emailsender|api|worker|maintenance-worker|ai-worker|scheduler) writers+=("$container") ;;
+    emailsender|worker|scheduler) writers+=("$container") ;;
+    api|maintenance-worker|ai-worker) writers+=("$container"); retired+=("$container") ;;
     redis) ;;
+    mysql) mysql_containers+=("$container") ;;
     *) echo "Unexpected service $service in project $project; refusing deployment." >&2; exit 1 ;;
   esac
 done
+
+if (( ${#mysql_containers[@]} > 1 )); then
+  echo "Multiple MySQL containers found; refusing to choose a database network." >&2
+  exit 1
+fi
+if (( ${#mysql_containers[@]} == 1 )); then
+  network_list=$(docker inspect --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' "${mysql_containers[0]}")
+  networks=()
+  if [[ -n "$network_list" ]]; then mapfile -t networks <<< "$network_list"; fi
+  mysql_network=""
+  for network in "${networks[@]}"; do
+    if [[ "$network" == "${project}_default" ]]; then mysql_network="$network"; fi
+  done
+  if [[ -z "$mysql_network" && ${#networks[@]} == 1 ]]; then mysql_network=${networks[0]}; fi
+  if [[ ! "$mysql_network" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ || "$mysql_network" == "bridge" || "$mysql_network" == "host" || "$mysql_network" == "none" ]]; then
+    echo "Cannot safely identify the existing MySQL network; no writers were stopped." >&2
+    exit 1
+  fi
+  printf '\nnetworks:\n  default:\n    external: true\n    name: %s\n' "$mysql_network" >> "$runtime_compose"
+  "${compose[@]}" config --quiet
+  echo "Preserving the existing MySQL container on network $mysql_network."
+fi
 if (( ${#writers[@]} )); then
   docker stop --time 1860 "${writers[@]}"
 fi
@@ -96,10 +127,13 @@ awk '!/^BACKEND_IMAGE=/ && !/^COMPOSE_PROJECT_NAME=/' .env > "$next_env"
 printf '\nBACKEND_IMAGE=%s\nCOMPOSE_PROJECT_NAME=%s\n' "$BACKEND_IMAGE" "$project" >> "$next_env"
 mv -- "$next_env" .env
 if [[ -f compose.yaml ]]; then cp -- compose.yaml "$release_dir/compose.previous.yaml"; fi
-cp -- "$release_dir/compose.yaml" compose.yaml
+cp -- "$runtime_compose" compose.yaml
 
-# Removes the retired split workers without deleting Redis data.
-"${compose[@]}" up -d --no-build --pull never --remove-orphans --wait --wait-timeout 180 < /dev/null
+# MySQL may share this Compose project but is managed by the existing server.
+# Never use --remove-orphans: it would delete that live database container.
+"${compose[@]}" up -d --no-build --pull never --wait --wait-timeout 180 < /dev/null
+# Delete only the retired application containers identified and stopped above.
+if (( ${#retired[@]} )); then docker rm "${retired[@]}"; fi
 
 # Health checks cover API, Redis, and worker responsiveness. Also verify every
 # queue so mail updates or AI review cannot silently remain unconsumed.
