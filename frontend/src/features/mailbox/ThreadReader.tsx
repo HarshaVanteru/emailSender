@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Archive, ArrowLeft, CornerUpLeft, Forward, Mail as MailIcon, MailOpen, Paperclip, Star, Trash2, Users } from 'lucide-react';
 import { changeMail, fetchThread } from './api';
-import { fetchSyncJob, startSync } from '../mail-sync/api';
+import { startSync } from '../mail-sync/api';
 import type { MailAction } from './api';
 import type { MailDetail, ThreadPage } from './types';
 import type { ThreadComposeMode, ThreadSendResponse } from '../compose-email/types';
 import { MailBody } from './MailBody';
 import { ThreadComposer } from '../compose-email/ThreadComposer';
+import { isPrimary } from './categories';
 import { ThreadAiPanel } from '../ai-assistant/ThreadAiPanel';
 
 export function ThreadReader({ accountId, threadId, editable, sendable, onChanged, onBack, revision = 0 }: {
@@ -26,8 +27,6 @@ export function ThreadReader({ accountId, threadId, editable, sendable, onChange
   const [actionError, setActionError] = useState('');
   const [notice, setNotice] = useState('');
   const [compose, setCompose] = useState<{ messageId: number; mode: ThreadComposeMode; initialBody?: string } | null>(null);
-  const [syncJobId, setSyncJobId] = useState<number | null>(null);
-  const [sentThreaded, setSentThreaded] = useState(true);
   const controller = useRef<AbortController | null>(null);
   const reader = useRef<HTMLElement>(null);
   const seenMessages = useRef(new Set<number>());
@@ -80,29 +79,10 @@ export function ThreadReader({ accountId, threadId, editable, sendable, onChange
     } finally { if (!request.signal.aborted) setBusyId(null); }
   }
   useEffect(() => { back.current?.focus(); }, []);
-  useEffect(() => {
-    if (syncJobId === null) return;
-    let active = true;
-    let timer: ReturnType<typeof setTimeout>;
-    async function poll() {
-      try {
-        const job = await fetchSyncJob(accountId, syncJobId!);
-        if (!active) return;
-        if (job.status === 'succeeded') {
-          setSyncJobId(null); setPage(null); setToken(null); setRetry(value => value + 1);
-          setNotice(sentThreaded ? 'Sent and conversation refreshed.' : 'Sent, but Gmail placed it in a different conversation. Check Sent.');
-        } else if (job.status === 'failed') { setSyncJobId(null); setNotice('Sent. Sync mail to refresh this conversation.'); }
-        else timer = setTimeout(poll, 3000);
-      } catch { if (active) timer = setTimeout(poll, 6000); }
-    }
-    timer = setTimeout(poll, 1600);
-    return () => { active = false; clearTimeout(timer); };
-  }, [accountId, syncJobId, sentThreaded, setToken]);
   async function sent(result: ThreadSendResponse) {
-    setSentThreaded(result.threaded);
-    setNotice(result.threaded ? 'Sent. Refreshing the conversation…' : 'Sent, but Gmail did not confirm the same conversation. Check Sent.');
-    try { const job = await startSync(accountId); setSyncJobId(job.id); }
-    catch { setNotice(result.threaded ? 'Sent. Sync mail to refresh the conversation.' : 'Sent. Check Sent for the new conversation.'); }
+    setNotice(result.threaded ? 'Sent. The conversation will update automatically.' : 'Sent. Check Sent for the new conversation.');
+    try { await startSync(accountId); }
+    catch { /* The scheduled update remains a fallback; never retry sending. */ }
   }
   useEffect(() => {
     const controller = new AbortController();
@@ -116,12 +96,12 @@ export function ThreadReader({ accountId, threadId, editable, sendable, onChange
     <div className="reader-heading">
       <button ref={back} className="mail-text-button" onClick={onBack}><ArrowLeft size={16} /> Back to messages</button>
       <h2>{page?.subject || (loading ? 'Opening conversation…' : 'Conversation')}</h2>
-      <p className="mail-muted">Cached conversation · External images are hidden until you choose to show them</p>
+      <p className="mail-muted">External images are hidden until you choose to show them</p>
       {actionError && <p className="mail-action-alert" role="alert">{actionError}</p>}
       {notice && <p className="mail-action-notice" role="status">{notice}</p>}
     </div>
     <div className="thread-scroll" aria-busy={loading}>
-      <ThreadAiPanel subject={page?.subject || 'Conversation'} accountId={accountId} threadId={threadId} onUseReply={sendable ? (messageId, body) => setCompose({ messageId, mode: 'reply', initialBody: body }) : undefined} />
+      {page?.items.some(message => isPrimary(message.labels)) && <ThreadAiPanel subject={page?.subject || 'Conversation'} accountId={accountId} threadId={threadId} onUseReply={sendable ? (messageId, body) => setCompose({ messageId, mode: 'reply', initialBody: body }) : undefined} />}
       {page?.items.map(message => <article className="thread-message" data-message-id={message.id} key={message.id}>
         <header className="message-heading">
           <div className="sender-avatar" aria-hidden="true">{(message.from_address || '?').replace(/^["\s]+/, '').slice(0, 1).toUpperCase()}</div>

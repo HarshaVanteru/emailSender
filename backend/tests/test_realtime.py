@@ -1,8 +1,11 @@
 """Real WebSocket handshake and account isolation; no live database or Gmail."""
 import json
+import time
 import unittest
 from datetime import timedelta
 from unittest.mock import patch
+import fakeredis
+from fakeredis.aioredis import FakeRedis as AsyncFakeRedis
 
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -40,8 +43,11 @@ class RealtimeTests(unittest.TestCase):
             patch.object(realtime, "SessionLocal", self.sessions),
             patch("app.core.config.SECRET_KEY", "test-signing-key-with-at-least-32-characters"),
             patch("app.core.config.FRONTEND_URL", "http://localhost:5173"),
-            patch.object(realtime, "POLL_SECONDS", 0.01),
+            patch.object(realtime, "HEARTBEAT_SECONDS", 0.01),
         ]
+        self.redis_server = fakeredis.FakeServer()
+        self.publisher = fakeredis.FakeRedis(server=self.redis_server)
+        self.patches.append(patch.object(realtime.Redis, "from_url", side_effect=lambda *a, **k: AsyncFakeRedis(server=self.redis_server)))
         for item in self.patches:
             item.start()
         self.client = TestClient(app)
@@ -65,6 +71,25 @@ class RealtimeTests(unittest.TestCase):
             ws.send_json({"token": self.token})
             self.assertEqual(ws.receive_json(), {"type": "ready", "account_id": self.account_id, "revision": None})
             self.assertEqual(ws.receive_json()["type"], "heartbeat")
+
+    def test_worker_event_notifies_without_frequent_database_snapshots(self):
+        with patch.object(realtime, "HEARTBEAT_SECONDS", 60), patch.object(
+                realtime, "sync_snapshot", side_effect=[1, 2]) as snapshot:
+            with self.client.websocket_connect(self.path) as ws:
+                ws.send_json({"token": self.token})
+                self.assertEqual(ws.receive_json()["revision"], 1)
+                time.sleep(0.05)
+                self.assertEqual(snapshot.call_count, 1)
+                self.publisher.publish(realtime.channel(self.account_id), "updated")
+                self.assertEqual(ws.receive_json(), {"type": "mailbox.updated", "account_id": self.account_id, "revision": 2})
+
+    def test_redis_outage_closes_socket_for_http_fallback(self):
+        with patch.object(realtime.Redis, "from_url", side_effect=realtime.RedisError("offline")):
+            with self.client.websocket_connect(self.path) as ws:
+                ws.send_json({"token": self.token})
+                with self.assertRaises(WebSocketDisconnect) as caught:
+                    ws.receive_json()
+                self.assertEqual(caught.exception.code, 1013)
 
     def test_foreign_account_invalid_and_expired_tokens_rejected(self):
         self.assert_rejected(create_access_token({"sub": "other@example.com"}))
@@ -113,3 +138,12 @@ class RealtimeTests(unittest.TestCase):
             db.get(SyncJob, job_id).status = "succeeded"
             db.commit()
         self.assertEqual(realtime.sync_snapshot(self.token, self.account_id), job_id)
+
+    def test_failed_job_changes_safety_snapshot_after_missed_publication(self):
+        self.assertIsNone(realtime.sync_snapshot(self.token, self.account_id))
+        with self.sessions() as db:
+            job = SyncJob(account_id=self.account_id, kind="initial", status="failed")
+            db.add(job)
+            db.commit()
+            job_id = job.id
+        self.assertEqual(realtime.sync_snapshot(self.token, self.account_id), f"None:failed:{job_id}")

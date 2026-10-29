@@ -7,5 +7,6 @@ export interface ConnectedAccount {
   modify_access?: boolean;
   draft_access?: boolean;
   sync_paused?: boolean;
+  mail_import_complete?: boolean;
   last_synced_at?: string | null;
 }

@@ -102,6 +102,23 @@ class PushTests(unittest.TestCase):
         self.assertEqual((job.status, job.error_code), ("queued", "queue_unavailable"))
         self.assertEqual(self.account.history_id, "100")
 
+    def test_notification_after_worker_commit_creates_followup_using_fresh_cursor(self):
+        # Keep a stale account in the webhook session while another session
+        # completes the worker transaction, as happens across API processes.
+        account_id = self.account.id
+        with self.sessions() as worker:
+            account = worker.get(ConnectedAccount, account_id)
+            account.history_id = "102"
+            worker.add(SyncJob(account_id=account_id, kind="incremental", status="succeeded"))
+            worker.commit()
+        with patch.object(push, "dispatch_job") as dispatch:
+            push.accept_notification(self.db, self.account.gmail_email, "102")
+            dispatch.assert_not_called()
+            push.accept_notification(self.db, self.account.gmail_email, "103")
+            dispatch.assert_called_once()
+        self.assertEqual(self.account.history_id, "102")
+        self.assertEqual(self.db.query(SyncJob).filter_by(active_account_id=account_id).one().status, "queued")
+
     def test_http_push_accepts_durable_job_and_rejects_invalid_token(self):
         app.dependency_overrides[get_db] = lambda: self.db
         try:

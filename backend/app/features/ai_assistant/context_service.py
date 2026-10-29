@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from sqlalchemy.exc import OperationalError
 
 from app.features.mailbox.models import AiSuggestion, EmailMessage
+from app.features.mailbox.categories import primary_message
 from app.features.mailbox.repository import mailbox_repository
 from app.features.ai_assistant.context_schemas import ContextAiOutput
 from app.features.ai_assistant.service import ai_service
@@ -46,14 +47,17 @@ def load_context(db, user_id, account_id, thread_id, message_id=None):
     if thread is None:
         raise HTTPException(404, 'Conversation not found in this account.')
     query = db.query(EmailMessage).filter_by(account_id=account_id, thread_id=thread_id)
-    recent = list(reversed(query.order_by(EmailMessage.internal_date.desc(), EmailMessage.id.desc()).limit(MAX_MESSAGES).all()))
+    eligible = query.filter(primary_message())
+    recent = list(reversed(eligible.order_by(EmailMessage.internal_date.desc(), EmailMessage.id.desc()).limit(MAX_MESSAGES).all()))
     if not recent:
-        raise HTTPException(404, 'No cached messages in this conversation.')
+        raise HTTPException(409, 'AI is available only for Primary messages.')
     target = None
     if message_id is not None:
         target = query.filter(EmailMessage.id == message_id).first()
         if target is None:
             raise HTTPException(404, 'Message not found in this conversation.')
+        if eligible.filter(EmailMessage.id == message_id).first() is None:
+            raise HTTPException(409, 'AI is available only for Primary messages.')
         if target not in recent:
             recent = [target, *recent[-(MAX_MESSAGES - 1):]]
     else:

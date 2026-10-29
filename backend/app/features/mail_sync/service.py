@@ -20,8 +20,6 @@ from app.integrations.gmail.client import gmail_service
 
 READ_SCOPES = {"https://mail.google.com/", "https://www.googleapis.com/auth/gmail.readonly",
                "https://www.googleapis.com/auth/gmail.modify"}
-RECENT_QUERY = "newer_than:30d"
-INITIAL_LIMIT = 600
 PAGE_SIZE = 100
 MAX_HISTORY_PAGES = 100
 MAX_CHANGED_MESSAGES = 2000
@@ -114,37 +112,40 @@ def changed_messages(service, cursor):
 
 
 def reconciliation_messages(db, service, account):
-    profile = execute(service.users().getProfile(userId="me"))
-    if profile.get("emailAddress", "").lower() != account.gmail_email.lower():
-        raise SyncFailure("mailbox_identity_mismatch", 409)
-    # Capture BEFORE scanning. Changes during the scan replay next time; never
-    # store a post-scan profile cursor that could skip intervening changes.
-    cursor = history_cursor(profile.get("historyId"))
-    recent, tokens = set(), set()
-    token = None
-    # Bound pages even when Gmail returns duplicate IDs.
-    for _ in range(INITIAL_LIMIT // PAGE_SIZE + 1):
-        options = {"userId": "me", "q": RECENT_QUERY, "maxResults": min(PAGE_SIZE, INITIAL_LIMIT - len(recent)),
-                   "includeSpamTrash": True}
-        if token:
-            options["pageToken"] = token
+    """Read one resumable page of every Gmail message, without a date cutoff."""
+    if account.mail_import_started_at is None:
+        profile = execute(service.users().getProfile(userId="me"))
+        if profile.get("emailAddress", "").lower() != account.gmail_email.lower():
+            raise SyncFailure("mailbox_identity_mismatch", 409)
+        # Replay changes from BEFORE the first page only after the scan finishes.
+        account.mail_import_history_id = history_cursor(profile.get("historyId"))
+        account.mail_import_started_at = utcnow()
+        account.mail_import_page_token = None
+        account.mail_import_seen_tokens = []
+        account.mail_import_complete = False
+    options = {"userId": "me", "maxResults": PAGE_SIZE, "includeSpamTrash": True}
+    token = account.mail_import_page_token
+    if token:
+        options["pageToken"] = token
+    try:
         page = execute(service.users().messages().list(**options))
-        recent.update(provider_id(message["id"]) for message in page.get("messages", []))
-        token = page.get("nextPageToken")
-        if not token or len(recent) >= INITIAL_LIMIT:
-            break
-        if token in tokens:
+    except HttpError as exc:
+        if token and exc.resp.status in (400, 404):
+            # Gmail page tokens can expire. Restart the listing safely; cached
+            # pages remain readable and the committed history cursor is retained.
+            account.mail_import_started_at = None
+            return reconciliation_messages(db, service, account)
+        raise
+    changed = {provider_id(message["id"]) for message in page.get("messages", [])}
+    next_token = page.get("nextPageToken")
+    seen = account.mail_import_seen_tokens or []
+    if next_token:
+        if not isinstance(next_token, str) or next_token in seen:
             raise SyncFailure("repeated_message_page")
-        tokens.add(token)
-    else:
-        raise SyncFailure("sync_listing_budget_exceeded", 409)
-    # Revalidate every previously cached ID, even if it moved out of the inbox,
-    # fell outside the recent window, or was permanently deleted during expiry.
-    known = {row[0] for row in db.query(EmailMessage.gmail_message_id).filter_by(account_id=account.id).all()}
-    changed = known | recent
-    if len(changed) > MAX_CHANGED_MESSAGES:
-        raise SyncFailure("sync_message_budget_exceeded", 409)
-    return changed, cursor
+        account.mail_import_seen_tokens = [*seen, next_token]
+    account.mail_import_page_token = next_token
+    account.mail_import_complete = not next_token
+    return changed, history_cursor(account.mail_import_history_id)
 
 
 def refresh_labels(db, service, account_id):
@@ -243,11 +244,18 @@ def refresh_threads(db, account_id, affected):
 def apply_sync(db, account, service, reconcile=False):
     """Apply a complete sync without committing; caller owns locks/transaction."""
     account_id = account.id
-    if account.history_id and not reconcile:
+    if account.history_id and account.mail_import_complete and not reconcile:
         try:
             changed, cursor = changed_messages(service, account.history_id)
             kind = "incremental"
         except HistoryExpired:
+            kind = "reconcile"
+            changed, cursor = reconciliation_messages(db, service, account)
+        except SyncFailure as exc:
+            if exc.code not in {"sync_message_budget_exceeded", "sync_history_budget_exceeded"}:
+                raise
+            # A large backlog must not permanently block all-mail delivery.
+            # Rebuild it through bounded, resumable pages instead.
             kind = "reconcile"
             changed, cursor = reconciliation_messages(db, service, account)
     else:
@@ -271,8 +279,20 @@ def apply_sync(db, account, service, reconcile=False):
             return execute(service.users().messages().attachments().get(
                 userId="me", messageId=gmail_id, id=attachment_id))["data"]
         upsert_message(db, account_id, normalize_message(raw, load_body), labels, affected_threads)
+    if account.mail_import_complete and account.mail_import_started_at is not None:
+        # Only a completed all-mail listing can evict messages not encountered.
+        stale = db.query(EmailMessage.gmail_message_id).filter(
+            EmailMessage.account_id == account_id,
+            EmailMessage.cached_at < account.mail_import_started_at).all()
+        for (gmail_id,) in stale:
+            remove_message(db, account_id, gmail_id, affected_threads)
+        account.mail_import_started_at = None
+        account.mail_import_history_id = None
+        account.mail_import_seen_tokens = None
     refresh_threads(db, account_id, affected_threads)
-    account.history_id, account.last_synced_at = cursor, utcnow()
+    if account.mail_import_complete:
+        account.history_id = cursor
+    account.last_synced_at = utcnow()
     return kind
 
 

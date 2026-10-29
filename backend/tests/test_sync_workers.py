@@ -25,6 +25,9 @@ from test_gmail_sync import FakeGmail, READ_SCOPE, error, message
 
 class WorkerTests(unittest.TestCase):
     def setUp(self):
+        notifications = patch.object(jobs, "publish_update")
+        self.notifications = notifications.start()
+        self.addCleanup(notifications.stop)
         self.engine = create_engine("sqlite://", poolclass=StaticPool)
         @event.listens_for(self.engine, "connect")
         def foreign_keys(connection, _):
@@ -106,6 +109,7 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(account.history_id, "100")
         self.assertGreater(account.next_reconcile_at, utcnow())
         self.assertEqual(self.db.query(EmailMessage).count(), 1)
+        self.notifications.assert_called_once_with(self.aid)
         count = len(self.service.calls)
         self.assertEqual(self.limiter.wait.call_count, count)
         self.run_job(jid)
@@ -131,7 +135,24 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual((job.status, job.attempts), ("succeeded", 2))
         self.assertEqual(self.db.query(EmailMessage).count(), 2)
 
-    def test_attempt_limit_pauses_schedule_and_manual_retry_resumes(self):
+    def test_full_import_automatically_dispatches_next_page_after_commit(self):
+        self.service.message_pages = {None: {"messages": [{"id": "m1"}], "nextPageToken": "older"},
+                                      "older": {"messages": [{"id": "m2"}]}}
+        self.service.messages_by_id["m2"] = message("m2", thread="t2", date="946684800000")
+        with patch("app.workers.celery_app.celery_app.send_task") as publish:
+            self.assertEqual(self.run_job(self.enqueue()).status, "succeeded")
+        account = self.db.get(ConnectedAccount, self.aid)
+        self.assertIsNone(account.history_id)
+        self.assertEqual(account.mail_import_page_token, "older")
+        followup = self.db.query(SyncJob).filter_by(active_account_id=self.aid).one()
+        publish.assert_called_once()
+        self.assertEqual(publish.call_args.kwargs["args"], [followup.id])
+        self.assertEqual(self.run_job(followup.id).status, "succeeded")
+        self.assertEqual(account.history_id, "100")
+        self.assertTrue(account.mail_import_complete)
+        self.assertEqual(self.db.query(EmailMessage).count(), 2)
+
+    def test_exhausted_temporary_failure_recovers_without_manual_sync(self):
         self.service.messages_by_id["m1"] = error(503)
         jid = self.enqueue()
         with patch.object(jobs.config, "SYNC_MAX_ATTEMPTS", 2):
@@ -139,9 +160,19 @@ class WorkerTests(unittest.TestCase):
             self.make_due(jid)
             job = self.run_job(jid)
         self.assertEqual((job.status, job.attempts, job.active_account_id), ("failed", 2, None))
-        self.assertTrue(self.db.get(ConnectedAccount, self.aid).sync_paused)
-        new_id = self.enqueue()
+        account = self.db.get(ConnectedAccount, self.aid)
+        self.assertFalse(account.sync_paused)
+        self.assertGreater(account.next_sync_at, utcnow())
+        publisher = MagicMock()
+        jobs.maintenance(self.sessions, publisher)
+        publisher.assert_not_called()
+        self.service.messages_by_id["m1"] = message("m1")
+        account.next_sync_at = utcnow() - timedelta(seconds=1)
+        self.db.commit()
+        jobs.maintenance(self.sessions, publisher)
+        new_id = publisher.call_args.args[0]
         self.assertNotEqual(jid, new_id)
+        self.assertEqual(self.run_job(new_id).status, "succeeded")
         self.assertFalse(self.db.get(ConnectedAccount, self.aid).sync_paused)
 
     def test_permanent_provider_failure_does_not_retry(self):
@@ -149,6 +180,7 @@ class WorkerTests(unittest.TestCase):
         job = self.run_job(self.enqueue())
         self.assertEqual((job.status, job.error_code, job.attempts), ("failed", "gmail_http_403", 1))
         self.assertTrue(self.db.get(ConnectedAccount, self.aid).sync_paused)
+        self.assertTrue(self.db.get(ConnectedAccount, self.aid).requires_reauth)
 
     def test_rate_limit_403_retries_but_permissions_403_does_not(self):
         exc = HttpError(Response({"status": "403"}),

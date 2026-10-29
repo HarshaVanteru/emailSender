@@ -11,7 +11,7 @@ const assert = require('node:assert/strict');
       const stored = [];
       let sends = 0;
       const summary = { id: 1, account_id: 1, thread_id: 1, from_address: 'Alex <alex@example.com>',
-        subject: 'Project update', snippet: 'Hello', internal_date: 1791543600000, labels: ['INBOX'], has_attachments: false };
+        subject: 'Project update', snippet: 'Hello', internal_date: 1791543600000, labels: ['INBOX', 'CATEGORY_PERSONAL'], has_attachments: false };
       const detail = { ...summary, to_addresses: [{ name: 'Owner', email: 'owner@example.com' }],
         cc_addresses: [], body_text: 'Please send the notes by Friday.', body_html: null, attachments: [] };
       await page.route('**/api/v1/**', async route => {
@@ -53,8 +53,8 @@ const assert = require('node:assert/strict');
       await page.goto((process.env.APP_URL || 'http://127.0.0.1:4174') + '/#token=test-session');
       const mailbox = page.getByRole('region', { name: 'Mailbox', exact: true });
       await mailbox.getByRole('heading', { name: 'Inbox', exact: true }).waitFor();
-      assert.equal(await page.getByRole('button', { name: 'Sync mail', exact: true }).count(), 1);
-      await mailbox.getByText(/Last synced/).waitFor();
+      assert.equal(await page.getByRole('button', { name: 'Sync mail', exact: true }).count(), 0);
+      assert.equal(await mailbox.getByText(/Last synced/).count(), 0);
       await page.getByRole('button', { name: /Project update/ }).click();
       await page.getByRole('button', { name: 'Open AI chat' }).click();
       await page.getByRole('dialog', { name: 'Email conversation chat' }).waitFor();

@@ -54,7 +54,19 @@ def save_connection(db: Session, user, credentials, profile_history_id=None):
     account.scopes = json.dumps(list(credentials.granted_scopes or credentials.scopes or []))
     account.profile_history_id = profile_history_id
     account.requires_reauth = False
+    account.sync_paused = False
+    account.next_sync_at = None
+    account.next_watch_attempt_at = None
     user.google_token = None
+    db.flush()
+    # Persist the connection and initial/update job together, even if Redis is
+    # unavailable. Maintenance can dispatch the durable job after recovery.
+    from app.features.mail_sync.service import READ_SCOPES
+    from app.features.mail_sync.jobs import enqueue_sync
+    if set(json.loads(account.scopes)) & READ_SCOPES:
+        enqueue_sync(db, user.id, account.id)
+    # enqueue_sync may reuse a job without committing. Reconnection flags and
+    # refreshed credentials must still be persisted in that case.
     db.commit()
     return account
 

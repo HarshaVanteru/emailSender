@@ -93,7 +93,7 @@ For an existing database, follow the database setup section below before migrati
 From the project root:
 
 ```powershell
-docker compose -f backend/compose.yaml up --build -d --wait --wait-timeout 120
+docker compose -f backend/compose.yaml up --build -d --remove-orphans --wait --wait-timeout 120
 npm --prefix frontend run dev -- --port 5173 --strictPort
 ```
 
@@ -107,8 +107,8 @@ In another terminal at the project root:
 
 ```powershell
 docker compose -f backend/compose.yaml ps
-docker compose -f backend/compose.yaml logs --tail 80 api worker maintenance-worker ai-worker scheduler
-docker compose -f backend/compose.yaml logs -f worker maintenance-worker ai-worker scheduler
+docker compose -f backend/compose.yaml logs --tail 80 api worker scheduler
+docker compose -f backend/compose.yaml logs -f worker scheduler
 ```
 
 Press Ctrl+C to exit log following. To stop the frontend, press Ctrl+C in its
@@ -281,8 +281,8 @@ The callback records Google's actual granted scopes, including previously
 approved permissions or partially declined consent; sync checks the actual grant.
 
 With the app bearer token, `POST /api/v1/accounts/{account_id}/sync` queues a job
-and returns `202 Accepted`. The worker imports up to 600 messages from the last
-30 days, with pagination and spam/trash included. It
+and returns `202 Accepted`. The worker imports the entire mailbox in resumable 100-message pages,
+with no date cutoff and with Spam/Trash included in the cache. It
 captures the profile cursor before scanning so changes during import replay on
 the next sync. Later calls consume every history page and refresh the current
 Gmail state for each changed ID, including message additions, label changes and
@@ -291,9 +291,9 @@ and attachment IDs. Text/HTML MIME parts and repeated RFC headers are normalized
 files are metadata-only. External text-body parts may be fetched from Gmail, but
 remote images/links in HTML are never requested by the sync service.
 
-Expired history triggers reconciliation: import recent messages and revalidate
-every previously cached ID, even if it was archived or aged outside the initial
-window. This retains valid older cached messages and removes confirmed 404s.
+Expired history triggers a resumable full-mailbox reconciliation, including
+archived and older messages. A completed listing removes cached messages no
+longer present; partial listings never evict previously cached messages.
 An explicit JSON body `{"reconcile": true}` also requests reconciliation.
 Cache changes, thread metadata and the cursor commit in one transaction. Failures
 roll them back, then record a retry or terminal failure with a sanitized error
@@ -324,7 +324,7 @@ audience). Set `GMAIL_PUSH_TOPIC`, `PUBSUB_PUSH_AUDIENCE`,
 `PUBSUB_PUSH_SERVICE_ACCOUNT`, and `PUBSUB_SUBSCRIPTION` in `backend/.env`.
 Resource names use `projects/PROJECT/topics/TOPIC` and
 `projects/PROJECT/subscriptions/SUBSCRIPTION`. Restart API, maintenance worker,
-and beat after configuration; apply migration `0007` first. The hourly renewal
+and beat after configuration; apply migration `0007` first. The renewal
 task establishes watches for read-enabled accounts, renews them daily, and
 retries failed registrations after an hour. Incoming notifications only queue
 an incremental sync; they never advance the committed Gmail history cursor.
@@ -348,13 +348,14 @@ overwriting newer work. Database rows remain authoritative if Redis loses a task
 
 Transport failures, rate limits and provider 5xx responses retry the same job
 with exponential jittered backoff (initially 7.5â€“15 seconds, capped at 300
-seconds). Permission/payload errors and exhausted attempts fail visibly and pause
-that account's automatic schedule. Resolve the cause and submit a manual sync to
-resume. Workers only read Gmail; **sending is never automatically retried**.
+seconds). Exhausted temporary failures schedule a fresh job after a cooldown
+(at least five minutes), without user intervention. Permission/payload errors
+pause the account for investigation; reconnecting Gmail resumes its schedule.
+Workers only read Gmail; **sending is never automatically retried**.
 
 The scheduler scans every 30 seconds. Connected accounts with granted read access
-receive an initial import, then incremental sync every five minutes and daily
-reconciliation by default. Send-only, disconnected, reauthorization-required and
+receive an immediate initial import after connection, then incremental sync every
+five minutes and daily reconciliation by default. Send-only, disconnected, reauthorization-required and
 paused accounts are excluded. Redis enforces a shared per-account request budget.
 If the limiter is unavailable, workers retry without making unthrottled requests.
 
@@ -367,9 +368,12 @@ If the limiter is unavailable, workers retry without making unthrottled requests
 | `SYNC_TASK_TIME_LIMIT` | `1800` seconds; lease adds 60 seconds |
 | `SYNC_REQUESTS_PER_SECOND` | `10` per account, fixed one-second windows |
 
-The `backend/compose.yaml` runs Redis with AOF persistence, API, two sync worker
-processes, a separate maintenance worker, and one Celery beat scheduler. MySQL
-stays external and uses `DATABASE_URL` from `backend/.env`. For MySQL on the host,
+The `backend/compose.yaml` runs four containers: Redis with AOF persistence,
+API, one shared Celery worker, and one Celery beat scheduler. The worker runs
+two processes consuming `gmail-sync`, `gmail-maintenance`, and `gmail-ai`, so
+mail updates, recovery, watch renewal, and Mybox reviews share capacity. Slow AI
+reviews can delay mail updates under load. `--remove-orphans` removes the old
+separate worker containers when upgrading this Compose project. MySQL stays external and uses `DATABASE_URL` from `backend/.env`. For MySQL on the host,
 use `host.docker.internal` instead of `localhost` in that URL. Keep the existing
 OAuth, encryption, JWT and provider settings in `backend/.env`; `.env.example`
 documents required values. Environment files are excluded from the image.
@@ -380,16 +384,17 @@ Apply migrations with `docker compose -f backend/compose.yaml run --rm --no-deps
 
 Operational checks include queued-job age, failed jobs, account `sync_paused`,
 worker/beat availability and Redis persistence. Job status and account-list APIs
-expose recovery state; the mailbox UI can submit sync and track its result.
+expose recovery state for diagnostics. The mailbox updates automatically and
+does not expose manual sync controls or internal job status.
 See [Celery's Redis guidance](https://docs.celeryq.dev/en/stable/getting-started/backends-and-brokers/redis.html)
 and [periodic task guidance](https://docs.celeryq.dev/en/stable/userguide/periodic-tasks.html).
 
-Safety budgets are 100 history pages, 2000 distinct message IDs per operation,
-10 MiB decoded text/HTML per message, 1000 MIME parts and 30 nesting levels. A
-budget breach fails visibly without truncating data or advancing the cursor.
-Large backlogs may require explicit reconciliation or a later worker/budget
-configuration change. Historical messages beyond the initial window are not
-bulk-imported. HTML is cached as untrusted source and sanitized at the mailbox
+Incremental safety budgets are 100 history pages and 2000 distinct message IDs.
+Larger backlogs fall back to resumable all-mail reconciliation. Full imports
+have no total message cap; each page is committed separately, and the history
+cursor advances only after the entire listing completes. Message safety limits
+remain 10 MiB decoded text/HTML, 1000 MIME parts, and 30 nesting levels; violations
+fail without committing that page. HTML is cached as untrusted source and sanitized at the mailbox
 rendering boundary. Tests use isolated SQLite and mocked Gmail; live Google
 permissions/sync and MySQL locking remain external integration checks.
 
@@ -404,8 +409,14 @@ available for account, message and conversation requests.
 
 Enable inbox access explicitly when prompted. This requests the additional
 Gmail read permission; send-only accounts continue working with the composer.
-Sync mail queues a job and polls its status, including saved jobs waiting for
-Redis recovery. Cached mail remains readable by its owner after disconnecting;
+Connecting Gmail saves a durable update job in the same transaction as the
+connection. After the redirect, background activation dispatches the job and
+registers a Gmail watch when push is configured. Watch maintenance checks due
+registrations every minute, with per-account backoff after failures.
+The mailbox imports mail automatically, refreshes after committed updates, and
+shows initial loading and connection problems without requiring a sync button.
+Saved jobs survive Redis outages and temporary failures recover automatically.
+Cached mail remains readable by its owner after disconnecting;
 disconnect removes the Google credentials, not the existing local cache.
 
 | Method | Endpoint | Result |
@@ -643,7 +654,7 @@ and discard checks.
 
 ## Mybox: automatic incoming-mail review
 
-Mybox appears above Inbox. The background AI worker reviews incoming cached
+Mybox appears above Inbox. The background AI worker reviews only Gmail Primary cached
 messages (including the existing cache), flags suspected spam, and assigns
 critical/red, high/amber, normal/blue, or low/gray importance. Mybox contains
 only successful non-spam classifications, excluding Gmail Spam, Trash, Sent,
@@ -663,12 +674,13 @@ backing up the configured database. From the project root:
 docker compose -f backend/compose.yaml stop
 docker compose -f backend/compose.yaml build
 docker compose -f backend/compose.yaml run --rm --no-deps api python -m alembic upgrade head
-docker compose -f backend/compose.yaml up -d --wait --wait-timeout 120
+docker compose -f backend/compose.yaml up -d --remove-orphans --wait --wait-timeout 120
 ```
 
 Restart the frontend normally. No live database migration is run automatically
-by development or test commands. The stack now includes `ai-worker`, listening
-on the separate `gmail-ai` queue; deploy it and restart the single scheduler.
+by development or test commands. The shared `worker` consumes the `gmail-ai`
+queue alongside mail updates and maintenance; deploy it and restart the single
+scheduler. A separate AI worker container is not required.
 
 The scheduler scans for unreviewed mail every 30 seconds and processes up to
 five messages per task, newest first. Classification follows Gmail sync; delayed
@@ -682,3 +694,44 @@ Run `node tests/mybox.browser.cjs` against the local production server for mocke
 desktop/mobile navigation, importance markers, spam exclusion, search, and
 classification-completion refresh. Backend `test_mybox.py` checks filtering,
 account isolation, bounded provider input, failure recovery, and stale leases.
+
+### Event-driven mailbox refresh
+
+Workers publish account-scoped Redis notifications after committing mailbox or
+AI review changes. The API subscribes before taking the initial snapshot, then
+forwards updates over the authenticated WebSocket. A 60-second heartbeat checks
+access and recovers missed notifications; it replaces the previous three-second
+database polling. Redis outages close the socket so the browser uses its fallback.
+
+While the socket is healthy, the browser does not poll account or job endpoints.
+It refreshes on notifications, reconnect, and when the tab becomes visible.
+If the socket is unavailable, a single 30-second fallback refreshes the mailbox;
+this fallback skips hidden tabs and stops when the socket is ready. Replies also
+refresh through mailbox events rather than a separate job-status polling loop.
+
+### Gmail categories and full mailbox import
+
+Apply migration `0009` before restarting the API and shared worker. This adds
+resumable all-mail import state; existing recent-only accounts are backfilled
+automatically. Each 100-message page commits its cache and continuation token
+together. Failed pages retain the previous checkpoint, expired page tokens
+restart the listing, and repeated tokens are rejected. After the final page,
+messages absent from the full listing are removed and changes since the pre-scan
+history cursor are replayed by incremental updates. No live migration is run
+by development or test commands.
+
+Primary, Promotions, Social, Updates, and Forums use Gmail's `CATEGORY_*`
+labels, independent of AI classification (see [Gmail label semantics](https://developers.google.com/workspace/gmail/api/guides/labels)). All mail excludes Spam and Trash;
+those have separate sections, with Trash taking precedence over Spam.
+Category sections exclude sent messages and drafts. Search and pagination
+remain account- and section-scoped.
+
+Only messages explicitly labeled `CATEGORY_PERSONAL`, without another
+`CATEGORY_*` label or `SPAM`, `TRASH`, `SENT`, or `DRAFT`, can enter automatic
+AI review or conversation AI. Unlabeled messages remain readable but are not
+sent to the model. Mixed conversation contexts filter out ineligible messages;
+direct AI requests for them are rejected before model invocation. The standalone
+writing assistant, OAuth grants, authentication, and model prompts are unchanged.
+
+Run `python -m unittest discover -s tests -p test_primary_categories.py -v`
+from `backend` for isolated AI eligibility and category visibility checks.

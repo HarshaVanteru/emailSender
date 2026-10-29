@@ -73,7 +73,10 @@ def parse_push(body):
 
 
 def accept_notification(db, email, cursor):
-    account = db.query(ConnectedAccount).filter_by(gmail_email=email).first()
+    # Wait for an in-flight cache transaction, then re-read its committed cursor.
+    # A notification newer than that cursor must create a follow-up job rather
+    # than disappear into the job that just completed.
+    account = db.query(ConnectedAccount).filter_by(gmail_email=email).populate_existing().with_for_update().first()
     if account is None or account.sync_paused:
         return
     try:

@@ -1,5 +1,6 @@
 """Database outbox, leased attempts, and retry policy for mailbox reads only."""
 import json
+import logging
 import random
 import secrets
 from datetime import timedelta
@@ -22,6 +23,7 @@ from app.integrations.gmail.client import gmail_service
 from app.features.mail_sync.service import SyncFailure, apply_sync, check_read_access, job_payload, owned_account, request_guard, utcnow
 from app.workers.celery_app import publish_job
 from app.workers.rate_limit import GmailRateLimiter
+from app.features.mail_sync.events import publish_update
 
 
 def enqueue_sync(db, user_id, account_id, reconcile=False, *, scheduled=False):
@@ -118,6 +120,21 @@ def submit_sync(db, user_id, account_id, reconcile=False):
     return job_payload(db.get(SyncJob, job_id))
 
 
+def activate_mailbox(user_id, account_id):
+    """Best-effort post-login dispatch; the persisted outbox is the fallback."""
+    from app.features.mail_sync.push import renew_watch
+    try:
+        with SessionLocal() as db:
+            job = db.query(SyncJob).filter_by(active_account_id=account_id).first()
+            if job is not None:
+                dispatch_job(db, job.id)
+            renew_watch(db, user_id, account_id)
+    except Exception:
+        # Login is complete. Maintenance will retry persisted work; do not
+        # expose provider details or turn a successful connection into an error.
+        logging.getLogger(__name__).warning("Mailbox activation deferred for account %s", account_id)
+
+
 def claim_job(db, job_id):
     snapshot = db.get(SyncJob, job_id)
     if snapshot is None or snapshot.status != "queued" or snapshot.available_at > utcnow():
@@ -182,7 +199,13 @@ def finish_attempt(db, account, job, code, retryable):
         job.dispatch_after = job.available_at
     else:
         job.status, job.finished_at, job.active_account_id = "failed", now, None
-        account.sync_paused = True
+        # Exhausted transient failures get a fresh job after a cooldown. Only
+        # permanent failures need intervention; users have no manual sync step.
+        account.sync_paused = not retryable
+        if code in ("gmail_http_401", "gmail_http_403"):
+            account.requires_reauth = True
+        if retryable:
+            account.next_sync_at = now + timedelta(seconds=max(300, config.SYNC_INTERVAL_SECONDS))
     db.add(AuditLog(user_id=account.user_id, account_id=account.id, action="mailbox.sync",
                     resource_type="sync_job", resource_id=str(job.id), outcome="retry" if job.status == "queued" else "failure"))
 
@@ -199,6 +222,7 @@ def record_failure(db, job_id, token, code, retryable):
         return
     finish_attempt(db, account, job, code, retryable)
     db.commit()
+    publish_update(account.id)
 
 
 def process_job(job_id, session_factory=SessionLocal, service_factory=None, limiter=None):
@@ -233,13 +257,21 @@ def process_job(job_id, session_factory=SessionLocal, service_factory=None, limi
             now = utcnow()
             job.status, job.finished_at, job.error_code = "succeeded", now, None
             job.active_account_id = job.lease_token = job.lease_expires_at = None
-            account.next_sync_at = now + timedelta(seconds=config.SYNC_INTERVAL_SECONDS)
-            if job.kind in ("initial", "reconcile"):
+            # Once a full listing finishes, replay changes since its starting
+            # cursor promptly rather than waiting a full polling interval.
+            account.next_sync_at = now if not account.mail_import_complete or job.kind in ("initial", "reconcile") else now + timedelta(seconds=config.SYNC_INTERVAL_SECONDS)
+            if account.mail_import_complete and job.kind in ("initial", "reconcile"):
                 account.next_reconcile_at = now + timedelta(seconds=config.SYNC_RECONCILE_SECONDS)
             account.sync_paused = False
             db.add(AuditLog(user_id=user_id, account_id=account_id, action="mailbox.sync",
                             resource_type="sync_job", resource_id=str(job_id), outcome="success"))
             db.commit()
+            publish_update(account_id)
+            if not account.mail_import_complete:
+                # Commit each page before dispatching the next. A queue outage
+                # leaves this job durable for the scheduler to pick up.
+                followup = enqueue_sync(db, user_id, account_id)
+                dispatch_job(db, followup.id)
         except Exception as exc:
             db.rollback()
             code, retryable = classify_failure(exc)

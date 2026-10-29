@@ -98,7 +98,7 @@ const detail = (id) => ({ ...summary(id), to_addresses: [{ name: 'Harsha', email
       await page.getByLabel('Unread only').check();
       await page.getByRole('button', { name: /A fresh start/ }).waitFor();
       assert(requested.some(url => url.searchParams.get('unread') === 'true'));
-      await page.getByLabel('Search cached mail').fill('nothing');
+      await page.getByLabel('Search mail').fill('nothing');
       await page.getByRole('button', { name: 'Search', exact: true }).click();
       await page.getByRole('heading', { name: 'No matching messages' }).waitFor();
       await page.getByRole('button', { name: 'Clear', exact: true }).click();
@@ -114,14 +114,12 @@ const detail = (id) => ({ ...summary(id), to_addresses: [{ name: 'Harsha', email
       await page.getByRole('button', { name: /A fresh start/ }).waitFor();
       await page.getByLabel('Filter by label').selectOption('Label_1');
       await page.getByRole('heading', { name: 'Projects', exact: true }).waitFor();
-      await page.getByRole('button', { name: 'Sync mail', exact: true }).click();
-      await page.getByText('Sync saved. Waiting for the sync service to recover.').waitFor();
-      await page.getByText('Mailbox updated.', { exact: true }).waitFor();
-      assert.equal(syncPosts, 1);
+      assert.equal(await page.getByRole('button', { name: 'Sync mail', exact: true }).count(), 0);
+      assert.equal(syncPosts, 0);
       await page.getByLabel('Choose mailbox', { exact: true }).selectOption('2');
       await page.getByRole('link', { name: 'Enable inbox access' }).waitFor();
       assert.match(await page.getByRole('link', { name: 'Enable inbox access' }).getAttribute('href'), /mailbox_access=true/);
-      assert.equal(await page.getByRole('button', { name: 'Sync mail', exact: true }).isDisabled(), true);
+      assert.equal(await page.getByRole('button', { name: 'Sync mail', exact: true }).count(), 0);
       await page.getByRole('heading', { name: 'Nothing here yet' }).waitFor();
       assert.equal(await page.getByRole('button', { name: /A fresh start/ }).count(), 0);
       await page.getByRole('navigation', { name: 'Workspace', exact: true }).getByRole('button', { name: 'Write', exact: true }).click();

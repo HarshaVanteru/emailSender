@@ -1,4 +1,4 @@
-# Backend: build an image, push it to GHCR, then tell the server to pull it.
+# Backend: test, publish one image, migrate, and deploy the four-service stack.
 
 name: backend
 
@@ -8,12 +8,16 @@ on:
     paths:
       - "backend/**"
       - ".github/workflows/backend.yml"
+      - ".github/deploy/**"
+      - ".github/tests/**"
 
   pull_request:
     branches: [main, master]
     paths:
       - "backend/**"
       - ".github/workflows/backend.yml"
+      - ".github/deploy/**"
+      - ".github/tests/**"
 
   workflow_dispatch:
     inputs:
@@ -23,7 +27,10 @@ on:
         required: false
         default: false
 
-# One deploy at a time per branch.
+permissions:
+  contents: read
+
+# Avoid cancelling a running migration or deployment.
 concurrency:
   group: backend-${{ github.ref }}
   cancel-in-progress: false
@@ -32,7 +39,6 @@ env:
   REGISTRY: ghcr.io
   IMAGE_BASE: emailsender-backend
   DEPLOY_DIR: /var/www/html/emailsender
-  SERVICE_NAME: emailsender
 
 jobs:
   test:
@@ -56,6 +62,17 @@ jobs:
         run: |
           cp backend/.env.example backend/.env
           docker compose -f backend/compose.yaml config --quiet
+          BACKEND_IMAGE=ghcr.io/example/emailsender-backend:validation \
+            docker compose --project-directory backend --env-file backend/.env \
+            -f .github/deploy/compose.yaml config --quiet
+          diff -u <(printf '%s\n' emailsender redis scheduler worker | sort) \
+            <(BACKEND_IMAGE=ghcr.io/example/emailsender-backend:validation \
+              docker compose --project-directory backend --env-file backend/.env \
+              -f .github/deploy/compose.yaml config --services | sort)
+      - name: Validate deployment script syntax
+        run: bash -n .github/deploy/backend.sh
+      - name: Deployment sequencing regression tests
+        run: python -m unittest discover -s .github/tests -v
 
   build:
     needs: test
@@ -108,6 +125,10 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    concurrency:
+      group: emailsender-production
+      cancel-in-progress: false
     env:
       SERVER_HOST: ${{ secrets.SERVER_HOST }}
       SERVER_USERNAME: ${{ secrets.SERVER_USERNAME }}
@@ -117,10 +138,14 @@ jobs:
       BASELINE_LEGACY_DATABASE: ${{ github.event_name == 'workflow_dispatch' && inputs.baseline_legacy_database && 'true' || 'false' }}
 
     steps:
+      - uses: actions/checkout@v7
+
       - name: Set up SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
         run: |
           mkdir -p ~/.ssh
-          printf '%s\n' "${{ secrets.SERVER_SSH_KEY }}" > ~/.ssh/id_deploy
+          printf '%s\n' "$SERVER_SSH_KEY" > ~/.ssh/id_deploy
           chmod 600 ~/.ssh/id_deploy
           ssh-keyscan -H "$SERVER_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
           cat >> ~/.ssh/config <<EOF
@@ -133,90 +158,20 @@ jobs:
             ServerAliveInterval 30
           EOF
 
-      - name: Pull image, migrate database, and restart API
+      - name: Upload deployment bundle
         run: |
-          ssh deploy "BACKEND_IMAGE='$IMAGE' GHCR_USERNAME='$GHCR_USERNAME' GHCR_PAT='$GHCR_PAT' DEPLOY_DIR='$DEPLOY_DIR' SERVICE_NAME='$SERVICE_NAME' BASELINE_LEGACY_DATABASE='$BASELINE_LEGACY_DATABASE' bash -s" <<'REMOTE'
-          set -euo pipefail
-          cd "$DEPLOY_DIR"
+          ssh deploy "mkdir -p '$DEPLOY_DIR/.deploy/$GITHUB_SHA'"
+          rsync -az --chmod=D700,F600 .github/deploy/ "deploy:$DEPLOY_DIR/.deploy/$GITHUB_SHA/"
 
-          echo "$GHCR_PAT" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
-          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
-
-          export BACKEND_IMAGE
-          touch .env
-          grep -v '^BACKEND_IMAGE=' .env > .env.next || true
-          echo "BACKEND_IMAGE=$BACKEND_IMAGE" >> .env.next
-          mv .env.next .env
-
-          docker compose pull "$SERVICE_NAME"
-          docker compose stop "$SERVICE_NAME"
-
-          # Explicit one-time adoption of the original users-only database.
-          # Refuse to stamp a versioned or partially migrated database.
-          if [ "$BASELINE_LEGACY_DATABASE" = "true" ]; then
-            # Never let a container consume the SSH heredoc containing this script.
-            docker compose run -T --interactive=false --rm --no-deps "$SERVICE_NAME" python -c '
-          from alembic import command
-          from alembic.config import Config
-          from alembic.migration import MigrationContext
-          from sqlalchemy import create_engine, inspect
-          from app.core.config import DATABASE_URL
-
-          engine = create_engine(DATABASE_URL)
-          with engine.connect() as connection:
-              inspector = inspect(connection)
-              revisions = MigrationContext.configure(connection).get_current_heads()
-              tables = set(inspector.get_table_names()) - {"alembic_version"}
-              expected = {"id", "email", "name", "google_token", "signature", "preferences", "bio"}
-              if revisions or tables != {"users"}:
-                  raise SystemExit("Refusing legacy stamp: database must be unversioned with only the users table.")
-              columns = {column["name"] for column in inspector.get_columns("users")}
-              if columns != expected:
-                  raise SystemExit("Refusing legacy stamp: users columns do not match migration 0001.")
-          command.stamp(Config("alembic.ini"), "0001")
-          ' < /dev/null
-          fi
-
-          echo "Applying database migrations"
-          docker compose run -T --interactive=false --rm --no-deps "$SERVICE_NAME" python -m alembic upgrade head < /dev/null
-          docker compose run -T --interactive=false --rm --no-deps "$SERVICE_NAME" python -m alembic current < /dev/null
-          echo "Starting API after successful migrations"
-          docker compose up -d --remove-orphans "$SERVICE_NAME" < /dev/null
-          docker image prune -f
-          docker compose ps
-          REMOTE
-
-      - name: Check API health
+      - name: Log the server into GHCR
+        id: registry_login
         run: |
-          ssh deploy "DEPLOY_DIR='$DEPLOY_DIR' SERVICE_NAME='$SERVICE_NAME' bash -s" <<'REMOTE'
-          set -euo pipefail
-          cd "$DEPLOY_DIR"
+          printf '%s' "$GHCR_PAT" | ssh deploy "docker login '$REGISTRY' --username '$GHCR_USERNAME' --password-stdin"
 
-          # Probe the deployed service directly. The host's port 8000 can belong
-          # to another service, and production can override the container PORT.
-          check_api_health() {
-            docker compose exec -T "$SERVICE_NAME" python -c '
-          import json, os, urllib.request
-          url = "http://127.0.0.1:" + os.environ.get("PORT", "8000") + "/api/health"
-          with urllib.request.urlopen(url, timeout=1) as response:
-              payload = json.load(response)
-              if payload.get("status") != "healthy" or payload.get("service") != "emailSender API":
-                  raise SystemExit("Unexpected health response: " + repr(payload))
-          '
-          }
+      - name: Drain workers, migrate database, and deploy all four services
+        run: |
+          ssh deploy "DEPLOY_DIR='$DEPLOY_DIR' BACKEND_IMAGE='$IMAGE' BASELINE_LEGACY_DATABASE='$BASELINE_LEGACY_DATABASE' bash '$DEPLOY_DIR/.deploy/$GITHUB_SHA/backend.sh'"
 
-          for _ in $(seq 1 30); do
-            if check_api_health; then
-              echo "API is ready"
-              exit 0
-            fi
-            sleep 2
-          done
-
-          echo "The API was not ready after 30 attempts" >&2
-          check_api_health || true
-
-          docker compose ps -a "$SERVICE_NAME"
-          docker compose logs --since=15m --tail=150 "$SERVICE_NAME"
-          exit 1
-          REMOTE
+      - name: Clear server registry credentials
+        if: ${{ always() && (steps.registry_login.outcome == 'success' || steps.registry_login.outcome == 'failure') }}
+        run: ssh deploy "docker logout '$REGISTRY'" >/dev/null 2>&1 || true

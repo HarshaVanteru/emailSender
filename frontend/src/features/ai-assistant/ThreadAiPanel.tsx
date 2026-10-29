@@ -51,7 +51,7 @@ export function ThreadAiPanel({ accountId, threadId, subject, onUseReply }: {
     finally { setBusy(false); }
   }
   return <FloatingChat title="Email conversation chat"><div className="thread-ai-panel">
-    <p className="chat-context"><strong>{subject || '(No subject)'}</strong><br />Using up to eight recent synced messages in this conversation.</p>
+    <p className="chat-context"><strong>{subject || '(No subject)'}</strong><br />Using up to eight recent Primary messages in this conversation.</p>
     <div className="chat-quick-actions">
       <button disabled={busy} onClick={() => { void generate('summarize', 'Summarize this conversation.'); }}>Summarize</button>
       <button disabled={busy} onClick={() => { void generate('summarize', 'Explain this conversation in plain language, including what the sender wants and any uncertainties.'); }}>Explain this email</button>

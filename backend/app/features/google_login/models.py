@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
 
 from app.core.database import Base
 
@@ -14,6 +14,11 @@ class ConnectedAccount(Base):
     # A profile snapshot is NOT a committed synchronization cursor.
     profile_history_id = Column(String(255), nullable=True)
     history_id = Column(String(255), nullable=True)
+    mail_import_complete = Column(Boolean, nullable=False, default=False, server_default="0")
+    mail_import_page_token = Column(Text, nullable=True)
+    mail_import_history_id = Column(String(255), nullable=True)
+    mail_import_started_at = Column(DateTime, nullable=True)
+    mail_import_seen_tokens = Column(JSON, nullable=True)
     last_synced_at = Column(DateTime, nullable=True)
     next_sync_at = Column(DateTime, nullable=True, index=True)
     next_reconcile_at = Column(DateTime, nullable=True)

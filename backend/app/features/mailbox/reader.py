@@ -13,6 +13,7 @@ from app.features.google_login.models import ConnectedAccount
 from app.features.mailbox.models import EmailAttachment, EmailLabel, EmailMessage, MessageLabel
 from app.features.mailbox.repository import mailbox_repository
 from app.features.mail_sync.service import owned_account
+from app.features.mailbox.categories import has_label, primary_message, CATEGORIES
 
 
 def scope_key(*values):
@@ -33,15 +34,6 @@ def decode_cursor(token, scope):
         return data[2], data[3]
     except (ValueError, TypeError, binascii.Error, UnicodeDecodeError):
         raise HTTPException(400, "Invalid page token for this account or filter.") from None
-
-
-def has_label(label):
-    return (EmailMessage.id.in_(
-        # Account correlation is explicit even though internal message IDs are unique.
-        select(MessageLabel.message_id).join(
-            EmailLabel, and_(EmailLabel.id == MessageLabel.label_id, EmailLabel.account_id == MessageLabel.account_id)
-        ).where(MessageLabel.account_id == EmailMessage.account_id, EmailLabel.gmail_label_id == label)
-    ))
 
 
 def serialize_messages(db, account_id, rows, detail=False):
@@ -97,12 +89,20 @@ def list_messages(db, user_id, account_id, *, label=None, unread=None, q="", pag
     if label == "MYBOX":
         query = query.join(MessageTriage, and_(MessageTriage.account_id == EmailMessage.account_id,
             MessageTriage.message_id == EmailMessage.id)).filter(
-            MessageTriage.state == "succeeded", MessageTriage.is_spam == 0,
-            ~has_label("SPAM"), ~has_label("TRASH"), ~has_label("SENT"), ~has_label("DRAFT"))
+            MessageTriage.state == "succeeded", MessageTriage.is_spam == 0, primary_message())
         if importance is not None:
             query = query.filter(MessageTriage.importance == importance)
+    elif label == "CATEGORY_PERSONAL":
+        query = query.filter(primary_message())
     elif label:
         query = query.filter(has_label(label))
+        if label in CATEGORIES:
+            query = query.filter(~has_label("SENT"), ~has_label("DRAFT"))
+    if thread_id is None:
+        if label == "SPAM":
+            query = query.filter(~has_label("TRASH"))
+        elif label != "TRASH":
+            query = query.filter(~has_label("SPAM"), ~has_label("TRASH"))
     if unread is not None:
         query = query.filter(has_label("UNREAD") if unread else ~has_label("UNREAD"))
     if q:

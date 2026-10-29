@@ -19,7 +19,7 @@ celery_app.conf.update(
                  "mailbox.watch_renewal": {"queue": "gmail-maintenance"}},
     beat_schedule={"mailbox-triage": {"task": "mailbox.triage", "schedule": 30.0},
                    "mailbox-maintenance": {"task": "mailbox.maintenance", "schedule": 30.0},
-                   "gmail-watch-renewal": {"task": "mailbox.watch_renewal", "schedule": 3600.0}},
+                   "gmail-watch-renewal": {"task": "mailbox.watch_renewal", "schedule": 60.0}},
 )
 
 

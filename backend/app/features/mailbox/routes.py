@@ -85,8 +85,7 @@ def mybox_status(account_id: int, user: User = Depends(get_current_user), db: Se
     from sqlalchemy import func
     owned_account(db, user.id, account_id)
     incoming = db.query(EmailMessage).filter(EmailMessage.account_id == account_id,
-        ~mailbox_reader.has_label("SENT"), ~mailbox_reader.has_label("DRAFT"),
-        ~mailbox_reader.has_label("SPAM"), ~mailbox_reader.has_label("TRASH"))
+        mailbox_reader.primary_message())
     states = dict(incoming.join(MessageTriage, MessageTriage.message_id == EmailMessage.id).with_entities(
         MessageTriage.state, func.count()).group_by(MessageTriage.state).all())
     return {"enabled": config.MYBOX_ENABLED, "configured": bool(config.GROQ_API_KEY),
@@ -99,7 +98,10 @@ def retry_mybox(account_id: int, user: User = Depends(get_current_user), db: Ses
     from app.features.mail_sync.service import owned_account, utcnow
     from app.features.mailbox.models import MessageTriage
     owned_account(db, user.id, account_id)
-    count = db.query(MessageTriage).filter_by(account_id=account_id, state="failed").update(
+    from app.features.mailbox.models import EmailMessage
+    eligible = db.query(EmailMessage.id).filter(EmailMessage.account_id == account_id, mailbox_reader.primary_message())
+    count = db.query(MessageTriage).filter_by(account_id=account_id, state="failed").filter(
+        MessageTriage.message_id.in_(eligible)).update(
         {"state": "retry", "attempts": 0, "available_at": utcnow(), "updated_at": utcnow()}, synchronize_session=False)
     db.commit()
     return {"queued": count}

@@ -5,7 +5,7 @@ from urllib.parse import urlencode, urlsplit
 
 import requests
 from cryptography.fernet import InvalidToken
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
@@ -57,6 +57,7 @@ def gmail_auth(renew_consent: bool = False, mailbox_access: bool = False, modify
 @auth_router.get("/google/callback")
 def gmail_auth_callback(
     request: Request,
+    background_tasks: BackgroundTasks,
     state: str,
     code: str | None = None,
     error: str | None = None,
@@ -94,7 +95,10 @@ def gmail_auth_callback(
                 user = User(email=email, name=info.get("name"))
                 db.add(user)
                 db.flush()
-            account_service.save_connection(db, user, credentials, history_id)
+            account = account_service.save_connection(db, user, credentials, history_id)
+            if scopes & READ_SCOPES:
+                from app.features.mail_sync.jobs import activate_mailbox
+                background_tasks.add_task(activate_mailbox, user.id, account.id)
         except account_service.OfflineAccessRequired:
             db.rollback()
             # Offer an explicit retry without creating a session or widening scopes.
@@ -134,7 +138,7 @@ def list_accounts(current_user: User = Depends(get_current_user), db: Session = 
              "modify_access": bool(set(json.loads(account.scopes or "[]")) & {GMAIL_MODIFY_SCOPE, "https://mail.google.com/"}),
              "draft_access": bool(set(json.loads(account.scopes or "[]")) & {GMAIL_COMPOSE_SCOPE, GMAIL_MODIFY_SCOPE, "https://mail.google.com/"}),
              "sync_paused": account.sync_paused, "last_synced_at": account.last_synced_at,
-             "next_sync_at": account.next_sync_at} for account in accounts]
+             "next_sync_at": account.next_sync_at, "mail_import_complete": account.mail_import_complete} for account in accounts]
 
 
 @accounts_router.delete("/{account_id}")

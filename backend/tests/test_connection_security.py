@@ -130,8 +130,10 @@ class ConnectionSecurityTests(unittest.TestCase):
         service.users.return_value.getProfile.return_value.execute.return_value = mailbox
         with patch("app.features.google_login.routes.gmail_service.create_google_flow", return_value=flow) as create_flow, patch(
             "app.features.google_login.routes.requests.get", return_value=userinfo), patch(
-            "app.features.google_login.routes.gmail_service.get_gmail_service", return_value=service):
+            "app.features.google_login.routes.gmail_service.get_gmail_service", return_value=service), patch(
+            "app.features.mail_sync.jobs.activate_mailbox") as activate:
             response = self.client.get("/api/v1/auth/google/callback", params={"state": state, "code": "code"}, follow_redirects=False)
+        self.activation = activate
         self.assertEqual(flow.code_verifier, verifier)
         create_flow.assert_called_once_with(scopes=creds.scopes)
         return response, service
@@ -187,6 +189,27 @@ class ConnectionSecurityTests(unittest.TestCase):
         self.assertEqual(response.status_code, 307)
         self.assertEqual(account_service.find_account(self.db, self.user).profile_history_id, "123")
         service.users.return_value.getProfile.assert_called_once_with(userId="me")
+        from app.features.mailbox.models import SyncJob
+        account = account_service.find_account(self.db, self.user)
+        job = self.db.query(SyncJob).one()
+        self.assertEqual((job.account_id, job.status, job.kind), (account.id, "queued", "initial"))
+        self.assertIsNone(account.history_id)
+        self.activation.assert_called_once_with(self.user.id, account.id)
+
+    def test_reconnecting_mailbox_resumes_updates_and_reuses_active_job(self):
+        from app.features.mailbox.models import SyncJob
+        creds = credentials(scopes=["https://www.googleapis.com/auth/gmail.readonly"])
+        account = account_service.save_connection(self.db, self.user, creds)
+        job_id = self.db.query(SyncJob).one().id
+        account.sync_paused = True
+        account.requires_reauth = True
+        self.db.commit()
+        account_service.save_connection(self.db, self.user, creds)
+        self.db.rollback()
+        self.db.refresh(account)
+        self.assertFalse(account.sync_paused)
+        self.assertFalse(account.requires_reauth)
+        self.assertEqual(self.db.query(SyncJob).one().id, job_id)
 
     def test_missing_refresh_redirects_to_recovery_without_creating_session(self):
         from app.core.config import GMAIL_COMPOSE_SCOPE, GMAIL_MODIFY_SCOPE, GMAIL_READ_SCOPE

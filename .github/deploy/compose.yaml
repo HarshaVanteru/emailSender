@@ -1,0 +1,55 @@
+# Production stack. The API keeps its existing server-side service name.
+x-backend: &backend
+  image: ${BACKEND_IMAGE:?BACKEND_IMAGE must identify the release image}
+  env_file: .env
+  environment:
+    REDIS_URL: redis://redis:6379/0
+    PORT: ${PORT:-8000}
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  depends_on:
+    redis:
+      condition: service_healthy
+  restart: unless-stopped
+
+services:
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  emailsender:
+    <<: *backend
+    ports:
+      - "${API_BIND_ADDRESS:-127.0.0.1}:${API_PORT:-8000}:${PORT:-8000}"
+
+  worker:
+    <<: *backend
+    command: ["celery", "-A", "app.workers.celery_app:celery_app", "worker", "--hostname=mailbox@%h", "-Q", "gmail-sync,gmail-maintenance,gmail-ai", "--concurrency=2", "--loglevel=INFO"]
+    stop_grace_period: 31m
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import socket; from app.workers.celery_app import celery_app; node = 'mailbox@' + socket.gethostname(); result = celery_app.control.inspect(destination=[node], timeout=3).ping() or {}; raise SystemExit(0 if result.get(node, {}).get('ok') == 'pong' else 1)"
+      interval: 30s
+      timeout: 6s
+      start_period: 20s
+      retries: 5
+
+  scheduler:
+    <<: *backend
+    command: ["celery", "-A", "app.workers.celery_app:celery_app", "beat", "--schedule=/tmp/celerybeat-schedule", "--loglevel=INFO"]
+    healthcheck:
+      disable: true
+
+volumes:
+  redis-data:

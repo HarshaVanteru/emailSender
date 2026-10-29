@@ -46,7 +46,7 @@ export const Header: React.FC<HeaderProps> = ({ profile, checkingAuth, onRefresh
         {checkingAuth ? (
           <div className="flex items-center gap-1.5 text-[11px] text-zinc-400 bg-zinc-50 px-2 py-0.5 rounded border border-zinc-200 dark:border-zinc-800 dark:bg-zinc-900">
             <RefreshCw className="w-3 h-3 animate-spin text-zinc-400" />
-            <span>Syncing...</span>
+            <span>Connecting...</span>
           </div>
         ) : profile?.email ? (
           <div className="flex items-center gap-2">

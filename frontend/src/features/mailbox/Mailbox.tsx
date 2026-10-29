@@ -3,12 +3,13 @@ import { Inbox, Send, FileText, Search, PenLine, Mail, Paperclip, Star, ChevronD
 import { fetchConnectedAccounts, getGmailAuthUrl } from '../google-login/api';
 import { fetchLabels, fetchMail } from './api';
 import { watchMailbox } from '../mail-sync/realtime';
-import { fetchRecentSyncJobs, fetchSyncJob, startSync } from '../mail-sync/api';
+import { fetchRecentSyncJobs } from '../mail-sync/api';
 import type { ConnectedAccount } from '../google-login/types';
 import type { MailDetail, MailLabel, MailPage, MailSummary } from './types';
 import type { SyncJob } from '../mail-sync/types';
 import { apiRequest } from '../../shared/api/client';
 import { ThreadReader } from './ThreadReader';
+import { gmailCategories, matchesSection } from './categories';
 import './mailbox.css';
 
 export function Mailbox({ signedIn, onCompose }: { signedIn: boolean; onCompose: () => void }) {
@@ -46,9 +47,6 @@ function AccountMailbox({ account, accounts, onAccount, onCompose, onAccountsCha
   const [labelError, setLabelError] = useState('');
   const [revision, setRevision] = useState(0);
   const [job, setJob] = useState<SyncJob | null>(null);
-  const [startingSync, setStartingSync] = useState(false);
-  const [syncError, setSyncError] = useState('');
-  const startingSyncRef = useRef(false);
   useEffect(() => {
     if (label !== 'MYBOX') return;
     const request = new AbortController();
@@ -57,89 +55,61 @@ function AccountMailbox({ account, accounts, onAccount, onCompose, onAccountsCha
   }, [account.id, label, revision]);
   useEffect(() => {
     if (!account.is_connected || !account.mailbox_access) return;
-    return watchMailbox(account.id, () => setRevision(value => value + 1));
-  }, [account.id, account.is_connected, account.mailbox_access]);
+    const request = new AbortController();
+    let refreshing = false;
+    let refreshAgain = false;
+    async function refresh() {
+      if (request.signal.aborted || document.visibilityState === 'hidden') return;
+      if (refreshing) { refreshAgain = true; return; }
+      refreshing = true;
+      try {
+        const [recent, updatedAccounts] = await Promise.all([
+          fetchRecentSyncJobs(account.id, request.signal),
+          fetchConnectedAccounts(request.signal),
+        ]);
+        if (!request.signal.aborted) {
+          setJob(recent[0] || null);
+          onAccountsChange(updatedAccounts);
+        }
+      } catch { /* Reconnect, visibility refresh, or fallback will retry. */ }
+      finally {
+        if (!request.signal.aborted) setRevision(value => value + 1);
+        refreshing = false;
+        if (refreshAgain) { refreshAgain = false; void refresh(); }
+      }
+    }
+    const stop = watchMailbox(account.id, () => { void refresh(); });
+    return () => { request.abort(); stop(); };
+  }, [account.id, account.is_connected, account.mailbox_access, onAccountsChange]);
   useEffect(() => {
     const request = new AbortController();
     void fetchLabels(account.id, request.signal).then(result => { if (!request.signal.aborted) { setLabels(result); setLabelError(''); } }).catch(reason => { if (!request.signal.aborted) setLabelError(reason.message); });
     return () => request.abort();
   }, [account.id, revision]);
-  useEffect(() => {
-    if (!account.is_connected || !account.mailbox_access) return;
-    const request = new AbortController();
-    let timer: ReturnType<typeof setTimeout>;
-    async function restoreSync() {
-      try {
-        const recent = await fetchRecentSyncJobs(account.id, request.signal);
-        if (!request.signal.aborted && recent[0]) {
-          const latest = recent[0];
-          setJob(previous => !previous || latest.id > previous.id || (latest.id === previous.id && previous.status !== 'succeeded' && previous.status !== 'failed') ? latest : previous);
-        }
-      } catch { /* Retry status on the next interval. */ }
-      finally { if (!request.signal.aborted) timer = setTimeout(restoreSync, 15000); }
-    }
-    void restoreSync();
-    return () => { request.abort(); clearTimeout(timer); };
-  }, [account.id, account.is_connected, account.mailbox_access]);
-  useEffect(() => {
-    if (job?.status !== 'succeeded') return;
-    const request = new AbortController();
-    void fetchConnectedAccounts(request.signal).then(items => {
-      if (!request.signal.aborted) { onAccountsChange(items); setRevision(value => value + 1); }
-    }).catch(() => { if (!request.signal.aborted) { setRevision(value => value + 1); } });
-    return () => request.abort();
-  }, [job?.id, job?.status, onAccountsChange]);
-  const pending = job?.status === 'queued' || job?.status === 'running';
-  async function syncMail() {
-    if (startingSyncRef.current || pending || !account.is_connected || !account.mailbox_access) return;
-    startingSyncRef.current = true;
-    setStartingSync(true); setSyncError('');
-    try { setJob(await startSync(account.id)); }
-    catch (reason) { setSyncError(reason instanceof Error ? reason.message : 'Could not start mailbox sync.'); }
-    finally { startingSyncRef.current = false; setStartingSync(false); }
-  }
-  const jobId = job?.id;
-  useEffect(() => {
-    if (!pending || !jobId) return;
-    const request = new AbortController();
-    let timer: ReturnType<typeof setTimeout>;
-    const poll = async () => {
-      try {
-        const next = await fetchSyncJob(account.id, jobId, request.signal);
-        if (request.signal.aborted) return;
-        setJob(next);
-        if (next.status !== 'succeeded' && next.status !== 'failed') timer = setTimeout(poll, 3000);
-      } catch {
-        if (!request.signal.aborted) timer = setTimeout(poll, 10000);
-      }
-    };
-    timer = setTimeout(poll, 1600);
-    return () => { request.abort(); clearTimeout(timer); };
-  }, [account.id, jobId, pending]);
-  const title = labels.find(item => item.id === label)?.name || ({ MYBOX: 'Mybox', INBOX: 'Inbox', SENT: 'Sent', DRAFT: 'Drafts' }[label]) || (label ? label : 'All mail');
+  const title = gmailCategories.find(item => item.id === label)?.name || ({ SPAM: 'Spam', TRASH: 'Trash' }[label]) || labels.find(item => item.id === label)?.name || ({ MYBOX: 'Mybox', INBOX: 'Inbox', SENT: 'Sent', DRAFT: 'Drafts' }[label]) || (label ? label : 'All mail');
   return <main className="mailbox-layout">
     <aside className="mail-sidebar" aria-label="Mailbox navigation">
       <button className="mail-primary compose-mail" onClick={onCompose}><PenLine size={17} /> Write an email</button>
       <label className="mail-account">Mailbox<select aria-label="Choose mailbox" value={account.id} onChange={event => onAccount(Number(event.target.value))}>{accounts.map(item => <option key={item.id} value={item.id}>{item.email}</option>)}</select></label>
       <nav aria-label="Mail folders">{[
-        { id: 'MYBOX', name: 'Mybox', Icon: Sparkles }, { id: 'INBOX', name: 'Inbox', Icon: Inbox }, { id: 'SENT', name: 'Sent', Icon: Send },
+        { id: 'MYBOX', name: 'Mybox', Icon: Sparkles }, { id: 'INBOX', name: 'Inbox', Icon: Inbox },
+        ...gmailCategories.map(category => ({ ...category, Icon: Mail })), { id: 'SENT', name: 'Sent', Icon: Send },
         { id: 'DRAFT', name: 'Drafts', Icon: FileText }, { id: '', name: 'All mail', Icon: Mail },
+        { id: 'SPAM', name: 'Spam', Icon: Mail }, { id: 'TRASH', name: 'Trash', Icon: Mail },
       ].map(({ id, name, Icon }) => <button key={id} className={label === id ? 'selected' : ''} aria-current={label === id ? 'page' : undefined} onClick={() => setLabel(id)}><Icon size={17} />{name}</button>)}</nav>
-      <label className="mail-label-filter">Labels<select aria-label="Filter by label" value={['MYBOX', 'INBOX', 'SENT', 'DRAFT', ''].includes(label) ? '' : label} onChange={event => setLabel(event.target.value)}><option value="">Choose a label</option>{labels.filter(item => !['INBOX', 'SENT', 'DRAFT'].includes(item.id)).map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+      <label className="mail-label-filter">Labels<select aria-label="Filter by label" value={['MYBOX', 'INBOX', 'SENT', 'DRAFT', 'SPAM', 'TRASH', '', ...gmailCategories.map(item => item.id)].includes(label) ? '' : label} onChange={event => setLabel(event.target.value)}><option value="">Choose a label</option>{labels.filter(item => !['INBOX', 'SENT', 'DRAFT', 'SPAM', 'TRASH', ...gmailCategories.map(category => category.id)].includes(item.id)).map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
       {labelError && <p className="mail-muted" role="alert">Labels could not load. <button className="mail-text-button" onClick={() => setRevision(value => value + 1)}>Retry labels</button></p>}
       <div className="mail-sidebar-note"><span className="eyebrow">ROOM TO FOCUS</span><p>Read here. Find the right words in your writing workspace.</p></div>
     </aside>
     <section className="mail-main" aria-label="Mailbox">
-      <div className="mail-toolbar"><h1>{title}</h1><button type="button" className="mail-button" disabled={startingSync || pending || !account.is_connected || !account.mailbox_access} onClick={() => { void syncMail(); }}>{startingSync || pending ? 'Syncing…' : 'Sync mail'}</button></div>
-      <div className="mail-sync-status" role="status"><span>{pending
-        ? job?.error_code === 'queue_unavailable' ? 'Sync saved. Waiting for the sync service to recover.' : job?.kind === 'reconcile' ? 'Checking cached mail against Gmail…' : 'Synchronizing mailbox…'
-        : job?.status === 'succeeded' ? 'Mailbox updated.' : job?.status === 'failed' ? 'Mailbox sync failed. Try syncing again.' : 'Your cached mailbox is ready.'}</span>{account.last_synced_at && <span> Last synced: {new Date(account.last_synced_at).toLocaleString()}</span>}</div>
-      {syncError && <p className="mail-notice" role="alert">{syncError}</p>}
+      <div className="mail-toolbar"><h1>{title}</h1></div>
+      {account.is_connected && account.mailbox_access && (!account.last_synced_at || account.mail_import_complete === false) && job?.status !== 'failed' && <div className="mail-sync-status"><progress aria-label="Loading your mailbox" /><span>Loading your mail…</span></div>}
+      {account.is_connected && account.mailbox_access && job?.status === 'failed' && <p className="mail-notice" role="status">Mail updates are temporarily unavailable. Your existing messages are still available.</p>}
       {(!account.is_connected || !account.mailbox_access) && <div className="mail-notice">{!account.is_connected ? 'Reconnect Gmail to update your mailbox.' : 'Allow read access to bring your Gmail messages here.'} <a href={getGmailAuthUrl(account.requires_reauth, true)}>{account.is_connected ? 'Enable inbox access' : 'Reconnect Gmail'}</a></div>}
       {account.is_connected && account.mailbox_access && !account.modify_access && <div className="mail-notice">To mark, star, archive or trash messages, allow Gmail change access. <a href={getGmailAuthUrl(false, false, true)}>Enable mail actions</a></div>}
-      {label === 'MYBOX' && <div className="mybox-notice"><strong>Mybox</strong><p>AI-reviewed incoming mail, with suspected spam excluded. Messages awaiting review stay available in Inbox.</p>{myboxStatus && <p role="status">{!myboxStatus.enabled ? 'Automatic AI review is turned off.' : !myboxStatus.configured ? 'Configure the AI provider to start automatic review.' : `${myboxStatus.pending} messages awaiting AI review.`}{myboxStatus.failed > 0 && <> {myboxStatus.failed} reviews could not finish. <button className="mail-text-button" onClick={() => { void apiRequest(`accounts/${account.id}/mybox-retry`, undefined, 'POST').then(() => setRevision(value => value + 1)).catch(() => setLabelError('Could not retry AI review. Please try again.')); }}>Retry reviews</button></>}</p>}<div className="mybox-legend" role="group" aria-label="Filter by importance">{(['critical', 'high', 'normal', 'low'] as const).map(level => <button type="button" key={level} className={`mail-importance mybox-filter ${level}`} aria-pressed={importance === level} onClick={() => setImportance(current => current === level ? null : level)}>{level[0].toUpperCase() + level.slice(1)}</button>)}</div></div>}
-      <form className="mail-search" role="search" onSubmit={event => { event.preventDefault(); setQuery(search.trim()); }}><Search size={17} aria-hidden="true" /><label htmlFor="mail-search-query">Search mail</label><input id="mail-search-query" name="q" type="search" autoCapitalize="off" autoCorrect="off" spellCheck={false} aria-label="Search cached mail" placeholder="Search sender, subject, or message…" value={search} maxLength={200} onChange={event => setSearch(event.target.value)} /><button type="submit">Search</button>{query && <button type="button" onClick={() => { setSearch(''); setQuery(''); }}>Clear</button>}</form>
-      <div className="mail-filter-bar"><span>{query ? `Results for “${query}” in ${title}` : 'Recent synchronized messages'}</span><label><input type="checkbox" checked={unread} onChange={event => setUnread(event.target.checked)} /> Unread only</label></div>
+      {label === 'MYBOX' && <div className="mybox-notice"><strong>Mybox</strong><p>AI-reviewed Primary mail, with suspected spam excluded. Other categories remain in their own sections.</p>{myboxStatus && <p role="status">{!myboxStatus.enabled ? 'Automatic AI review is turned off.' : !myboxStatus.configured ? 'Configure the AI provider to start automatic review.' : `${myboxStatus.pending} messages awaiting AI review.`}{myboxStatus.failed > 0 && <> {myboxStatus.failed} reviews could not finish. <button className="mail-text-button" onClick={() => { void apiRequest(`accounts/${account.id}/mybox-retry`, undefined, 'POST').then(() => setRevision(value => value + 1)).catch(() => setLabelError('Could not retry AI review. Please try again.')); }}>Retry reviews</button></>}</p>}<div className="mybox-legend" role="group" aria-label="Filter by importance">{(['critical', 'high', 'normal', 'low'] as const).map(level => <button type="button" key={level} className={`mail-importance mybox-filter ${level}`} aria-pressed={importance === level} onClick={() => setImportance(current => current === level ? null : level)}>{level[0].toUpperCase() + level.slice(1)}</button>)}</div></div>}
+      <form className="mail-search" role="search" onSubmit={event => { event.preventDefault(); setQuery(search.trim()); }}><Search size={17} aria-hidden="true" /><label htmlFor="mail-search-query">Search mail</label><input id="mail-search-query" name="q" type="search" autoCapitalize="off" autoCorrect="off" spellCheck={false} aria-label="Search mail" placeholder="Search sender, subject, or message…" value={search} maxLength={200} onChange={event => setSearch(event.target.value)} /><button type="submit">Search</button>{query && <button type="button" onClick={() => { setSearch(''); setQuery(''); }}>Clear</button>}</form>
+      <div className="mail-filter-bar"><span>{query ? `Results for “${query}” in ${title}` : 'Recent messages'}</span><label><input type="checkbox" checked={unread} onChange={event => setUnread(event.target.checked)} /> Unread only</label></div>
       {label === 'DRAFT' && <p className="mail-notice">Drafts saved in Gmail appear here for reading. Your writing workspace draft stays separate.</p>}
       <MailResults key={`${label}:${unread}:${query}:${label === 'MYBOX' ? importance : ''}`} revision={revision} accountId={account.id} label={label} importance={label === 'MYBOX' ? importance : null} unread={unread} query={query} editable={Boolean(account.is_connected && account.modify_access)} sendable={Boolean(account.is_connected)} />
     </section>
@@ -156,7 +126,7 @@ function MailResults({ accountId, label, importance, unread, query, editable, se
   const [retry, setRetry] = useState(0);
   const lastButton = useRef<HTMLButtonElement | null>(null);
   const onChanged = (updated: MailDetail) => {
-    const matchesFolder = (!label || (label === 'MYBOX' ? updated.ai_is_spam === false && !updated.labels.some(item => ['SPAM', 'TRASH', 'SENT', 'DRAFT'].includes(item)) : updated.labels.includes(label))) && (!importance || updated.ai_importance === importance);
+    const matchesFolder = matchesSection(updated.labels, label, updated.ai_is_spam) && (!importance || updated.ai_importance === importance);
     const matches = matchesFolder && (!unread || updated.labels.includes('UNREAD'));
     setPage(previous => previous && { ...previous, items: previous.items.map(item => item.id === updated.id ? updated : item).filter(item => item.id !== updated.id || matches) });
     setSelected(previous => previous?.id === updated.id ? (matchesFolder ? updated : null) : previous);
@@ -198,7 +168,7 @@ function MailResults({ accountId, label, importance, unread, query, editable, se
       </details>)}
       {loading && <p className="mail-state" role="status">Loading messages…</p>}
       {error && <div className="mail-state" role="alert"><p>{error}</p><button className="mail-button" onClick={() => { setLoading(true); setError(''); setRetry(value => value + 1); }}>Retry messages</button></div>}
-      {!loading && !error && page?.items.length === 0 && <div className="mail-empty"><Inbox size={32} /><h2>{query || unread || importance ? 'No matching messages' : 'Nothing here yet'}</h2><p>{query || unread || importance ? 'Try another search or clear the importance or unread filter.' : 'Sync your mailbox to bring recent messages into this folder.'}</p></div>}
+      {!loading && !error && page?.items.length === 0 && <div className="mail-empty"><Inbox size={32} /><h2>{query || unread || importance ? 'No matching messages' : 'Nothing here yet'}</h2><p>{query || unread || importance ? 'Try another search or clear the importance or unread filter.' : 'New messages will appear here automatically.'}</p></div>}
       {!loading && !error && page?.next_page_token && <button className="mail-button load-more" onClick={() => { setLoading(true); setPagination({ revision, token: page.next_page_token }); }}>Load more mail</button>}
     </section>
     {selected ? <ThreadReader key={selected.thread_id} accountId={accountId} threadId={selected.thread_id} revision={revision} editable={editable} sendable={sendable} onChanged={onChanged} onBack={() => { setSelected(null); requestAnimationFrame(() => lastButton.current?.focus()); }} /> : <div className="reader-placeholder"><div className="reader-art"><Mail size={35} /></div><h2>A moment for your mail.</h2><p>Choose a message to read the conversation.</p><span>External images stay blocked for your privacy.</span></div>}

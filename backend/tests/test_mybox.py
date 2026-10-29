@@ -11,7 +11,13 @@ class MyboxTests(unittest.TestCase):
     def setUpClass(cls):
         test_mailbox_reader.MailboxReaderTests.setUpClass.__func__(cls)
 
-    setUp = test_mailbox_reader.MailboxReaderTests.setUp
+    def setUp(self):
+        test_mailbox_reader.MailboxReaderTests.setUp(self)
+        label = EmailLabel(account_id=self.account.id, gmail_label_id="CATEGORY_PERSONAL", name="Primary", type="system")
+        self.db.add(label); self.db.flush()
+        for row in self.rows[:4]:
+            self.db.add(MessageLabel(account_id=self.account.id, message_id=row.id, label_id=label.id))
+        self.db.commit()
     tearDown = test_mailbox_reader.MailboxReaderTests.tearDown
     get = test_mailbox_reader.MailboxReaderTests.get
 
@@ -78,7 +84,7 @@ class MyboxWorkerTests(unittest.TestCase):
         test_mailbox_reader.MailboxReaderTests.setUpClass.__func__(cls)
 
     def setUp(self):
-        test_mailbox_reader.MailboxReaderTests.setUp(self)
+        MyboxTests.setUp(self)
         from sqlalchemy.orm import sessionmaker
         from unittest.mock import patch
         self.sessions = sessionmaker(bind=self.engine)
@@ -87,8 +93,11 @@ class MyboxWorkerTests(unittest.TestCase):
         self.db.commit()
         self.enabled = patch("app.core.config.MYBOX_ENABLED", True)
         self.enabled.start()
+        self.notifications = patch("app.features.ai_assistant.mybox.publish_update")
+        self.notifications.start()
 
     def tearDown(self):
+        self.notifications.stop()
         self.enabled.stop()
         test_mailbox_reader.MailboxReaderTests.tearDown(self)
 
