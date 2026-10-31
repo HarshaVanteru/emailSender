@@ -11,6 +11,7 @@ const assert = require('node:assert/strict');
       page.on('pageerror', error => errors.push(error.message));
       let stored = null, saves = 0, sends = 0, deletes = 0;
       await page.route('**/api/v1/**', async route => {
+        if (route.request().method() === 'GET' && /\/accounts\/\d+\/send-jobs$/.test(new URL(route.request().url()).pathname)) return route.fulfill({ json: [] });
         const path = new URL(route.request().url()).pathname;
         const method = route.request().method();
         let json;
@@ -27,9 +28,9 @@ const assert = require('node:assert/strict');
             attachments: (data.attachments || []).map(file => ({ ...file, size_bytes: Buffer.from(file.data, 'base64').length })) };
           json = stored;
         } else if (path.endsWith('/drafts/draft1') && method === 'GET') json = stored;
-        else if (path.endsWith('/drafts/draft1/send')) {
+        else if (path.endsWith('/drafts/draft1/send-jobs')) {
           assert.equal(route.request().postDataJSON().content_hash, stored.content_hash);
-          sends++; json = { message_id: 'sent1' };
+          sends++; assert.ok(route.request().headers()['idempotency-key']); json = { id: 'send-job-1', status: 'sent', result: { message_id: 'sent1' } };
         } else if (path.endsWith('/drafts/draft1') && method === 'DELETE') {
           assert.equal(route.request().postDataJSON().content_hash, stored.content_hash);
           deletes++; stored = null;

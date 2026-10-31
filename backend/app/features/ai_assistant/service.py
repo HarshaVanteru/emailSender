@@ -1,10 +1,11 @@
 import os
+from functools import cached_property
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import tool
 from langchain_groq import ChatGroq
 
-from app.core.config import GROQ_API_KEY
+from app.core.config import GROQ_API_KEY, AI_MODEL
 from app.features.ai_assistant.schemas import ChatMessage, CopilotResponse
 
 SYSTEM_PROMPT = """
@@ -62,13 +63,19 @@ def create_bio_tool(user_bio: str | None):
 
 
 class AiService:
-    def __init__(self):
-        self.llm = ChatGroq(
-            model="openai/gpt-oss-120b",
+    @cached_property
+    def llm(self):
+        # Mailbox startup and sync must work without an AI provider configured.
+        return ChatGroq(
+            model=AI_MODEL,
             api_key=GROQ_API_KEY or os.getenv("GROQ_API_KEY"),
             temperature=0.2,
+            timeout=30,
+            max_retries=0,
         )
-        self.structured_llm = self.llm.with_structured_output(CopilotResponse, method="json_mode")
+    @cached_property
+    def structured_llm(self):
+        return self.llm.with_structured_output(CopilotResponse, method="json_mode")
 
     def build_conversation(
         self,

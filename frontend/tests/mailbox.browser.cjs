@@ -33,6 +33,7 @@ const detail = (id) => ({ ...summary(id), to_addresses: [{ name: 'Harsha', email
       page.on('pageerror', error => errors.push(error.message));
       await page.route('https://tracker.invalid/**', route => { attackRequests++; return route.abort(); });
       await page.route('**/api/v1/**', async route => {
+        if (route.request().method() === 'GET' && /\/accounts\/\d+\/send-jobs$/.test(new URL(route.request().url()).pathname)) return route.fulfill({ json: [] });
         const url = new URL(route.request().url()), path = url.pathname;
         requested.push(url);
         const headers = { 'access-control-allow-origin': '*' };
@@ -117,8 +118,8 @@ const detail = (id) => ({ ...summary(id), to_addresses: [{ name: 'Harsha', email
       assert.equal(await page.getByRole('button', { name: 'Sync mail', exact: true }).count(), 0);
       assert.equal(syncPosts, 0);
       await page.getByLabel('Choose mailbox', { exact: true }).selectOption('2');
-      await page.getByRole('link', { name: 'Enable inbox access' }).waitFor();
-      assert.match(await page.getByRole('link', { name: 'Enable inbox access' }).getAttribute('href'), /mailbox_access=true/);
+      await page.getByRole('button', { name: 'Enable inbox access' }).waitFor();
+      assert.equal(await page.getByRole('button', { name: 'Enable inbox access' }).isEnabled(), true);
       assert.equal(await page.getByRole('button', { name: 'Sync mail', exact: true }).count(), 0);
       await page.getByRole('heading', { name: 'Nothing here yet' }).waitFor();
       assert.equal(await page.getByRole('button', { name: /A fresh start/ }).count(), 0);

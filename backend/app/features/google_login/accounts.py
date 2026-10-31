@@ -34,13 +34,25 @@ def find_account(db: Session, user, lock=False):
     return query.first()
 
 
-def save_connection(db: Session, user, credentials, profile_history_id=None):
-    account = find_account(db, user, lock=True)
+def save_connection(db: Session, user, credentials, profile_history_id=None, *, email=None, google_sub=None, account_id=None):
+    email = email or user.email
+    account = db.query(ConnectedAccount).filter(ConnectedAccount.gmail_email == email).with_for_update().first()
+    if account and account.user_id != user.id:
+        raise HTTPException(409, "This Gmail account belongs to another application user.")
+    if google_sub:
+        subject_account = db.query(ConnectedAccount).filter_by(google_sub=google_sub).first()
+        if subject_account and (subject_account.user_id != user.id or (account and account.id != subject_account.id)):
+            raise HTTPException(409, "This Google identity is already connected.")
+        account = subject_account or account
+    if account_id is not None and (not account or account.id != account_id):
+        raise HTTPException(409, "Reconnect the originally selected Gmail account.")
+    if account and account.google_sub and account.google_sub != google_sub:
+        raise HTTPException(409, "Google identity does not match the connected mailbox.")
     data = json.loads(credentials.to_json())
     previous = None
     if account and account.encrypted_credentials:
         previous = json.loads(decrypt(account.encrypted_credentials))
-    elif user.google_token:
+    elif email == user.email and user.google_token:
         previous = json.loads(user.google_token)
     # Google often omits a refresh token on a subsequent authorization.
     if not data.get("refresh_token") and previous:
@@ -48,8 +60,11 @@ def save_connection(db: Session, user, credentials, profile_history_id=None):
     if not data.get("refresh_token"):
         raise OfflineAccessRequired()
     if not account:
-        account = ConnectedAccount(user_id=user.id, gmail_email=user.email)
+        from app.core.config import INITIAL_SYNC_DAYS
+        account = ConnectedAccount(user_id=user.id, gmail_email=email, initial_sync_days=INITIAL_SYNC_DAYS)
         db.add(account)
+    account.gmail_email = email
+    account.google_sub = google_sub or account.google_sub
     account.encrypted_credentials = encrypt(json.dumps(data))
     account.scopes = json.dumps(list(credentials.granted_scopes or credentials.scopes or []))
     account.profile_history_id = profile_history_id
@@ -59,6 +74,9 @@ def save_connection(db: Session, user, credentials, profile_history_id=None):
     account.next_watch_attempt_at = None
     user.google_token = None
     db.flush()
+    from app.features.mailbox.models import AuditLog
+    db.add(AuditLog(user_id=user.id, account_id=account.id, action="account.connect",
+                    resource_type="account", resource_id=str(account.id), outcome="success"))
     # Persist the connection and initial/update job together, even if Redis is
     # unavailable. Maintenance can dispatch the durable job after recovery.
     from app.features.mail_sync.service import READ_SCOPES
@@ -109,6 +127,19 @@ def credentials_for_account(db: Session, user_id: int, account_id: int) -> Crede
         raise HTTPException(503, "Gmail credentials could not be loaded. Check server configuration.") from None
 
 
+def persist_provider_refresh(account, service):
+    """Persist a provider transport's single 401 refresh under the account lock."""
+    current = getattr(getattr(service, '_http', None), 'credentials', None)
+    if not isinstance(current, Credentials) or not account.encrypted_credentials:
+        return
+    old = json.loads(decrypt(account.encrypted_credentials))
+    updated = json.loads(current.to_json())
+    if updated.get('token') != old.get('token'):
+        if not updated.get('refresh_token'):
+            updated['refresh_token'] = old.get('refresh_token')
+        account.encrypted_credentials = encrypt(json.dumps(updated))
+
+
 def disconnect_account(db: Session, user, account_id: int):
     account = db.query(ConnectedAccount).filter(
         ConnectedAccount.id == account_id, ConnectedAccount.user_id == user.id,
@@ -136,4 +167,7 @@ def disconnect_account(db: Session, user, account_id: int):
     account.encrypted_credentials = None
     account.requires_reauth = False
     user.google_token = None
+    from app.features.mailbox.models import AuditLog
+    db.add(AuditLog(user_id=user.id, account_id=account.id, action="account.disconnect",
+                    resource_type="account", resource_id=str(account.id), outcome="success"))
     db.commit()

@@ -135,14 +135,14 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual((job.status, job.attempts), ("succeeded", 2))
         self.assertEqual(self.db.query(EmailMessage).count(), 2)
 
-    def test_full_import_automatically_dispatches_next_page_after_commit(self):
+    def test_recent_window_continues_after_page_commit(self):
         self.service.message_pages = {None: {"messages": [{"id": "m1"}], "nextPageToken": "older"},
                                       "older": {"messages": [{"id": "m2"}]}}
         self.service.messages_by_id["m2"] = message("m2", thread="t2", date="946684800000")
         with patch("app.workers.celery_app.celery_app.send_task") as publish:
             self.assertEqual(self.run_job(self.enqueue()).status, "succeeded")
         account = self.db.get(ConnectedAccount, self.aid)
-        self.assertIsNone(account.history_id)
+        self.assertEqual(account.history_id, "100")
         self.assertEqual(account.mail_import_page_token, "older")
         followup = self.db.query(SyncJob).filter_by(active_account_id=self.aid).one()
         publish.assert_called_once()
@@ -180,7 +180,7 @@ class WorkerTests(unittest.TestCase):
         job = self.run_job(self.enqueue())
         self.assertEqual((job.status, job.error_code, job.attempts), ("failed", "gmail_http_403", 1))
         self.assertTrue(self.db.get(ConnectedAccount, self.aid).sync_paused)
-        self.assertTrue(self.db.get(ConnectedAccount, self.aid).requires_reauth)
+        self.assertFalse(self.db.get(ConnectedAccount, self.aid).requires_reauth)  # Not every 403 means a revoked grant.
 
     def test_rate_limit_403_retries_but_permissions_403_does_not(self):
         exc = HttpError(Response({"status": "403"}),

@@ -15,6 +15,7 @@ from app.features.mailbox.models import AuditLog, EmailAttachment, EmailMessage,
 from app.features.google_login.accounts import credentials_for_account
 from app.integrations.gmail.text import html_to_text
 from app.integrations.gmail.client import gmail_service
+from app.integrations.gmail.adapter import GmailAdapter
 from app.features.mail_sync.service import owned_account, utcnow
 from app.workers.rate_limit import GmailRateLimiter
 
@@ -131,7 +132,7 @@ def prepare(db, user_id, account_id, message_id, mode):
             'original_attachments': len(original_files)}
 
 
-def send(db, user_id, account_id, message_id, data, service=None, limiter=None):
+def _send(db, user_id, account_id, message_id, data, service=None, limiter=None):
     current = prepare(db, user_id, account_id, message_id, data.mode)
     if current['context_hash'] != data.context_hash:
         raise HTTPException(409, 'This conversation changed. Review the latest message before sending.')
@@ -152,7 +153,7 @@ def send(db, user_id, account_id, message_id, data, service=None, limiter=None):
         if latest['gmail_thread_id']:
             payload['threadId'] = latest['gmail_thread_id']
         gate.wait(account_id)
-        result = service.users().messages().send(userId='me', body=payload).execute(num_retries=0)
+        result = GmailAdapter(service).send(payload).execute(num_retries=0)
         sent_id = result.get('id')
         if not isinstance(sent_id, str) or not sent_id:
             raise HTTPException(502, 'Gmail could not confirm sending. Check Sent before trying again.')
@@ -165,3 +166,12 @@ def send(db, user_id, account_id, message_id, data, service=None, limiter=None):
     except (HttpError, RedisError, OSError, OperationalError):
         db.rollback()
         raise HTTPException(503, 'Gmail could not confirm sending. Check Sent before trying again.') from None
+
+
+def send(db, user_id, account_id, message_id, data, service=None, limiter=None):
+    source_message(db, user_id, account_id, message_id)
+    from app.features.compose_email.inline_receipt import receipt
+    with receipt(db, user_id, account_id, 'legacy_thread', data.model_dump()) as record:
+        result = _send(db, user_id, account_id, message_id, data, service, limiter)
+        record.update(result)
+        return result

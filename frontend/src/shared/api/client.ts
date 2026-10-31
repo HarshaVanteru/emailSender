@@ -21,8 +21,8 @@ export class ApiError extends Error {
 }
 
 export async function apiRequest<T>(path: string, signal?: AbortSignal, method = 'GET', body?: object,
-  errorMessage = 'Could not load your mail. Please try again.'): Promise<T> {
-  const response = await fetch(apiUrl(path), { headers: { ...getAuthHeaders(), ...(body ? { 'Content-Type': 'application/json' } : {}) },
+  errorMessage = 'Could not load your mail. Please try again.', extraHeaders: Record<string, string> = {}): Promise<T> {
+  const response = await fetch(apiUrl(path), { headers: { ...getAuthHeaders(), ...(body ? { 'Content-Type': 'application/json' } : {}), ...extraHeaders },
     signal, method, ...(body ? { body: JSON.stringify(body) } : {}) });
   const data = await response.json().catch(() => ({}));
   // A broker outage still returns the durable job ID so the UI can track recovery.

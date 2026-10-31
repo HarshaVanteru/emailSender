@@ -1,0 +1,72 @@
+# Optional self-contained local stack; production keeps its existing four services.
+name: email-sender-local
+x-runtime: &runtime
+  DATABASE_URL: mysql+pymysql://custom_mail:${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in the root .env}@mysql:3306/custom_mail
+  DATABASE_HOST_OVERRIDE: mysql
+  REDIS_URL: redis://redis:6379/0
+
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: custom_mail
+      MYSQL_USER: custom_mail
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=$$MYSQL_PASSWORD mysqladmin ping -h localhost -u custom_mail --silent"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+  redis:
+    extends:
+      file: backend/compose.yaml
+      service: redis
+  api:
+    extends:
+      file: backend/compose.yaml
+      service: api
+    build: ./backend
+    environment: *runtime
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+  worker:
+    extends:
+      file: backend/compose.yaml
+      service: worker
+    build: ./backend
+    environment: *runtime
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+  scheduler:
+    extends:
+      file: backend/compose.yaml
+      service: scheduler
+    build: ./backend
+    environment: *runtime
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+  frontend:
+    build: ./frontend
+    ports:
+      - "127.0.0.1:5173:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  mysql-data:
+  redis-data:

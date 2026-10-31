@@ -41,6 +41,7 @@ class RealtimeTests(unittest.TestCase):
             self.account_id = account.id
         self.patches = [
             patch.object(realtime, "SessionLocal", self.sessions),
+            patch("app.core.config.ALLOW_LEGACY_SESSIONS", True),
             patch("app.core.config.SECRET_KEY", "test-signing-key-with-at-least-32-characters"),
             patch("app.core.config.FRONTEND_URL", "http://localhost:5173"),
             patch.object(realtime, "HEARTBEAT_SECONDS", 0.01),

@@ -16,9 +16,9 @@ async def gmail_pubsub_push(request: Request, db=Depends(get_db)):
     body = await request.body()
     if len(body) > 16384:
         raise HTTPException(413, "Pub/Sub push envelope is too large.")
-    email, cursor = parse_push(body)
+    email, cursor, message_id = parse_push(body, include_id=True)
     try:
-        await run_in_threadpool(accept_notification, db, email, cursor)
+        await run_in_threadpool(accept_notification, db, email, cursor, message_id)
     except SQLAlchemyError:
         db.rollback()
         raise HTTPException(503, "Push could not be persisted; retry delivery.") from None

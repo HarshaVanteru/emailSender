@@ -29,5 +29,6 @@ def upgrade():
 
 
 def downgrade():
-    op.drop_index("ix_ai_suggestions_owner_thread_date", table_name="ai_suggestions")
+    # MySQL may use this index to back the tenant FK; dropping the table also
+    # drops its indexes and avoids an invalid intermediate FK state.
     op.drop_table("ai_suggestions")

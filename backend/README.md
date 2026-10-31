@@ -2,6 +2,12 @@
 
 React/Vite email workspace with a FastAPI backend and Gmail integration.
 
+The current schema head is **0016**. See the
+[implemented phases and verification handoff](../docs/implementation-status.md)
+for multi-account OAuth, recent/on-demand sync, durable AI/send jobs and rollout
+compatibility. Apply migrations explicitly with writers stopped; no configured
+application database was migrated while preparing these changes.
+
 ## Project structure
 
 Application code is grouped by feature. Start with the feature folder when
@@ -125,8 +131,12 @@ If startup fails, inspect `docker compose -f backend/compose.yaml ps` and logs; 
 be running. Ensure no other API is using port 8000 and no other frontend is using
 port 5173. Run only this stack so there is one scheduler.
 
-The canonical implementation plan and ordered backlog are maintained in
-[Linear](https://linear.app/harshagenai/document/master-implementation-plan-ai-powered-gmail-client-3c249799afc8).
+The architectural contract is
+[custom_gmail_application_codex_spec.md](../custom_gmail_application_codex_spec.md).
+See the [Phase 0 repository review and implementation plan](../docs/architecture-review.md)
+for existing behavior, architectural conflicts and phased acceptance criteria.
+The earlier [Linear backlog](https://linear.app/harshagenai/document/master-implementation-plan-ai-powered-gmail-client-3c249799afc8)
+is historical planning context; conflicts are resolved in favor of the specification.
 
 ## API compatibility
 
@@ -281,19 +291,21 @@ The callback records Google's actual granted scopes, including previously
 approved permissions or partially declined consent; sync checks the actual grant.
 
 With the app bearer token, `POST /api/v1/accounts/{account_id}/sync` queues a job
-and returns `202 Accepted`. The worker imports the entire mailbox in resumable 100-message pages,
-with no date cutoff and with Spam/Trash included in the cache. It
-captures the profile cursor before scanning so changes during import replay on
-the next sync. Later calls consume every history page and refresh the current
+and returns `202 Accepted`. The worker imports a fixed recent window in resumable
+100-message pages, defaulting to 30 days, with Spam/Trash included in the cache.
+`INITIAL_SYNC_DAYS` sets new-account defaults; the owned `/sync/settings` endpoint
+configures individual accounts. Older mail loads only through explicit historical
+sessions. The worker captures the profile cursor before scanning and processes
+incremental changes during paginated repair. Later calls consume history pages and refresh the current
 Gmail state for each changed ID, including message additions, label changes and
 permanent deletions from the local cache. Replayed changes preserve local message
 and attachment IDs. Text/HTML MIME parts and repeated RFC headers are normalized;
 files are metadata-only. External text-body parts may be fetched from Gmail, but
 remote images/links in HTML are never requested by the sync service.
 
-Expired history triggers a resumable full-mailbox reconciliation, including
-archived and older messages. A completed listing removes cached messages no
-longer present; partial listings never evict previously cached messages.
+Expired history triggers recent-window reconciliation plus bounded verification of
+already cached messages, including archived and older messages. Limited listings
+never infer deletion; cached messages are removed only after a provider deletion/404.
 An explicit JSON body `{"reconcile": true}` also requests reconciliation.
 Cache changes, thread metadata and the cursor commit in one transaction. Failures
 roll them back, then record a retry or terminal failure with a sanitized error
@@ -369,10 +381,10 @@ If the limiter is unavailable, workers retry without making unthrottled requests
 | `SYNC_REQUESTS_PER_SECOND` | `10` per account, fixed one-second windows |
 
 The `backend/compose.yaml` runs four containers: Redis with AOF persistence,
-API, one shared Celery worker, and one Celery beat scheduler. The worker runs
-two processes consuming `gmail-sync`, `gmail-maintenance`, and `gmail-ai`, so
-mail updates, recovery, watch renewal, and Mybox reviews share capacity. Slow AI
-reviews can delay mail updates under load. `--remove-orphans` removes the old
+API, one worker service, and one Celery beat scheduler. The worker service supervises
+separate sync/maintenance, AI and send Celery processes, with reserved concurrency
+of 2, 2 and 1 respectively. Slow AI cannot occupy sync worker slots.
+`--remove-orphans` removes the old
 separate worker containers when upgrading this Compose project. MySQL stays external and uses `DATABASE_URL` from `backend/.env`. For MySQL on the host,
 use `host.docker.internal` instead of `localhost` in that URL. Keep the existing
 OAuth, encryption, JWT and provider settings in `backend/.env`; `.env.example`
@@ -678,8 +690,8 @@ docker compose -f backend/compose.yaml up -d --remove-orphans --wait --wait-time
 ```
 
 Restart the frontend normally. No live database migration is run automatically
-by development or test commands. The shared `worker` consumes the `gmail-ai`
-queue alongside mail updates and maintenance; deploy it and restart the single
+by development or test commands. The `worker` service runs a dedicated `gmail-ai`
+process alongside separate sync and send processes; deploy it and restart the single
 scheduler. A separate AI worker container is not required.
 
 The scheduler scans for unreviewed mail every 30 seconds and processes up to
@@ -703,22 +715,23 @@ forwards updates over the authenticated WebSocket. A 60-second heartbeat checks
 access and recovers missed notifications; it replaces the previous three-second
 database polling. Redis outages close the socket so the browser uses its fallback.
 
-While the socket is healthy, the browser does not poll account or job endpoints.
+While the socket is healthy, background mailbox refresh does not poll account or sync-job endpoints.
 It refreshes on notifications, reconnect, and when the tab becomes visible.
 If the socket is unavailable, a single 30-second fallback refreshes the mailbox;
 this fallback skips hidden tabs and stops when the socket is ready. Replies also
-refresh through mailbox events rather than a separate job-status polling loop.
+refresh through mailbox events. Explicit AI, send and historical requests follow
+their owned job/session status endpoints while pending.
 
-### Gmail categories and full mailbox import
+### Gmail categories and recent/on-demand import
 
-Apply migration `0009` before restarting the API and shared worker. This adds
-resumable all-mail import state; existing recent-only accounts are backfilled
-automatically. Each 100-message page commits its cache and continuation token
-together. Failed pages retain the previous checkpoint, expired page tokens
-restart the listing, and repeated tokens are rejected. After the final page,
-messages absent from the full listing are removed and changes since the pre-scan
-history cursor are replayed by incremental updates. No live migration is run
-by development or test commands.
+Migration `0011` replaces `0009`'s automatic full-mailbox policy. In-progress old
+scans restart inside the configured recent window without deleting cached history.
+Each recent page commits its cache and continuation checkpoint together. An owned
+historical session fetches one explicitly requested older page, protects the provider
+token with encryption, resumes failures and never changes the incremental cursor.
+The mailbox offers **Load older mail from Gmail** once local pages are exhausted.
+Repeated imports upsert existing rows; repeated tokens are rejected. Migrate to
+`head` with writers stopped before restarting API, worker and scheduler.
 
 Primary, Promotions, Social, Updates, and Forums use Gmail's `CATEGORY_*`
 labels, independent of AI classification (see [Gmail label semantics](https://developers.google.com/workspace/gmail/api/guides/labels)). All mail excludes Spam and Trash;
@@ -731,7 +744,8 @@ Only messages explicitly labeled `CATEGORY_PERSONAL`, without another
 AI review or conversation AI. Unlabeled messages remain readable but are not
 sent to the model. Mixed conversation contexts filter out ineligible messages;
 direct AI requests for them are rejected before model invocation. The standalone
-writing assistant, OAuth grants, authentication, and model prompts are unchanged.
+writing assistant accepts user-entered writing context separately. AI generation
+now returns a durable job (`202`); see the implementation handoff for API contracts.
 
 Run `python -m unittest discover -s tests -p test_primary_categories.py -v`
 from `backend` for isolated AI eligibility and category visibility checks.

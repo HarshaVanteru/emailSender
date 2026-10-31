@@ -15,6 +15,7 @@ const assert = require('node:assert/strict');
       const detail = () => ({ ...summary(), to_addresses: [{ name: 'Owner', email: 'owner@example.com' }], cc_addresses: [],
         body_text: 'Hello', body_html: null, attachments: [] });
       await page.route('**/api/v1/**', async route => {
+        if (route.request().method() === 'GET' && /\/accounts\/\d+\/send-jobs$/.test(new URL(route.request().url()).pathname)) return route.fulfill({ json: [] });
         const url = new URL(route.request().url()), path = url.pathname, method = route.request().method();
         const headers = { 'access-control-allow-origin': '*' };
         if (method === 'OPTIONS') return route.fulfill({ status: 204, headers: { ...headers,
@@ -49,8 +50,8 @@ const assert = require('node:assert/strict');
       });
       await page.goto((process.env.APP_URL || 'http://127.0.0.1:4174') + '/#token=test-session');
       await page.getByRole('button', { name: /Project update/ }).click();
-      await page.getByRole('link', { name: 'Enable mail actions' }).waitFor();
-      assert.match(await page.getByRole('link', { name: 'Enable mail actions' }).getAttribute('href'), /modify_access=true/);
+      await page.getByRole('button', { name: 'Enable mail actions' }).waitFor();
+      assert.equal(await page.getByRole('button', { name: 'Enable mail actions' }).isEnabled(), true);
       assert.equal(await page.getByRole('button', { name: 'Mark read' }).count(), 0);
       assert.equal(mutations, 0);
       canModify = true;

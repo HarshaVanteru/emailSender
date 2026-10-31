@@ -9,6 +9,14 @@ import test_mailbox_reader
 
 
 class ContextAiTests(unittest.TestCase):
+    def test_canonical_summary_is_invalidated_by_new_context(self):
+        self.run_ai('summarize', {'summary': 'Current summary'})
+        path = f'/api/v1/accounts/{self.account.id}/threads/{self.thread.id}/ai/summary'
+        self.assertEqual(self.client.get(path).status_code, 200)
+        self.rows[3].body_text = 'New content invalidates the summary version.'
+        self.db.commit()
+        self.assertEqual(self.client.get(path).status_code, 404)
+
     @classmethod
     def setUpClass(cls):
         test_mailbox_reader.MailboxReaderTests.setUpClass()

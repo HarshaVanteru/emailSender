@@ -12,6 +12,7 @@ const assert = require('node:assert/strict');
       const finished = '2026-10-14T12:00:00Z';
       const job = () => ({ id: 29, kind: 'reconcile', status: completed ? 'succeeded' : 'running', error_code: null, finished_at: completed ? finished : null });
       await page.route('**/api/v1/**', async route => {
+        if (route.request().method() === 'GET' && /\/accounts\/\d+\/send-jobs$/.test(new URL(route.request().url()).pathname)) return route.fulfill({ json: [] });
         const path = new URL(route.request().url()).pathname;
         const headers = { 'access-control-allow-origin': '*' };
         if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: { ...headers, 'access-control-allow-methods': 'GET, POST', 'access-control-allow-headers': 'authorization,content-type' } });

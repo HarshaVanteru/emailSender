@@ -273,7 +273,7 @@ class MailboxMigrationTests(unittest.TestCase):
             config.attributes["connection"] = connection
             command.stamp(config, "0001")
             command.upgrade(config, "head")
-            row = connection.execute(text("SELECT encrypted_credentials,history_id FROM connected_accounts")).one()
+            row = connection.execute(text("SELECT c.encrypted_payload AS encrypted_credentials,a.history_id FROM connected_accounts a JOIN oauth_credentials c ON c.account_id=a.id")).one()
             self.assertEqual(decrypt(row.encrypted_credentials), original)
             self.assertIsNone(row.history_id)
             self.assertIsNone(connection.execute(text("SELECT google_token FROM users")).scalar_one())

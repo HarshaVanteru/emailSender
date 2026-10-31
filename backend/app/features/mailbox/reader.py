@@ -29,7 +29,7 @@ def decode_cursor(token, scope):
         data = json.loads(base64.b64decode(token + "=" * (-len(token) % 4), altchars=b"-_", validate=True))
         if (not isinstance(data, list) or len(data) != 4 or data[:2] != [1, scope]
                 or type(data[2]) is not int or type(data[3]) is not int
-                or not 0 <= data[2] < 2**63 or not 0 < data[3] < 2**31):
+                or not 0 <= data[2] < 2**63 or not 0 < data[3] < 2**64):
             raise ValueError()
         return data[2], data[3]
     except (ValueError, TypeError, binascii.Error, UnicodeDecodeError):
@@ -70,10 +70,12 @@ def serialize_messages(db, account_id, rows, detail=False):
     return result
 
 
-def list_messages(db, user_id, account_id, *, label=None, unread=None, q="", page_size=30, page_token=None, thread_id=None, importance=None):
+def list_messages(db, user_id, account_id, *, label=None, unread=None, q="", page_size=30, page_token=None, thread_id=None, importance=None, important_only=False):
     owned_account(db, user_id, account_id)
     q = q.strip()
     scope = scope_key(user_id, account_id, label, unread, q, thread_id)
+    if important_only:
+        scope = scope_key(scope, 'important')
     if importance is not None:
         if label != "MYBOX" or importance not in {"critical", "high", "normal", "low"}:
             raise HTTPException(400, "Importance filtering requires Mybox and a valid importance level.")
@@ -90,6 +92,8 @@ def list_messages(db, user_id, account_id, *, label=None, unread=None, q="", pag
         query = query.join(MessageTriage, and_(MessageTriage.account_id == EmailMessage.account_id,
             MessageTriage.message_id == EmailMessage.id)).filter(
             MessageTriage.state == "succeeded", MessageTriage.is_spam == 0, primary_message())
+        if important_only:
+            query = query.filter(MessageTriage.importance.in_(['critical', 'high']))
         if importance is not None:
             query = query.filter(MessageTriage.importance == importance)
     elif label == "CATEGORY_PERSONAL":
@@ -121,8 +125,17 @@ def list_messages(db, user_id, account_id, *, label=None, unread=None, q="", pag
     rows = query.order_by(*order).limit(page_size + 1).all()
     more = len(rows) > page_size
     rows = rows[:page_size]
+    cursor = encode_cursor(rows[-1], scope) if more else None
+    history = {'status': 'idle', 'session_id': None}
+    if thread_id is None and not q and not unread and label != 'MYBOX':
+        from app.features.mail_sync.history_models import HistorySession
+        from app.core.time import utcnow
+        session = db.query(HistorySession).filter_by(account_id=account_id, user_id=user_id,
+            scope_key=hashlib.sha256((label or '').encode()).hexdigest()).first()
+        if session:
+            history = {'status': 'expired' if session.expires_at <= utcnow() else session.status, 'session_id': session.id}
     return {"items": serialize_messages(db, account_id, rows, detail=thread_id is not None),
-            "next_page_token": encode_cursor(rows[-1], scope) if more else None}
+            "next_page_token": cursor, 'next_cursor': cursor, 'has_more_local': more, 'historical_sync': history}
 
 
 def read_message(db, user_id, account_id, message_id):

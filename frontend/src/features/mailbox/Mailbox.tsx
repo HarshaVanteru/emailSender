@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Inbox, Send, FileText, Search, PenLine, Mail, Paperclip, Star, ChevronDown, Sparkles } from 'lucide-react';
 import { fetchConnectedAccounts, getGmailAuthUrl } from '../google-login/api';
+import { ConnectAccount } from '../google-login/ConnectAccount';
+import { HistoryControl } from './HistoryControl';
 import { fetchLabels, fetchMail } from './api';
 import { watchMailbox } from '../mail-sync/realtime';
 import { fetchRecentSyncJobs } from '../mail-sync/api';
@@ -30,7 +32,7 @@ export function Mailbox({ signedIn, onCompose }: { signedIn: boolean; onCompose:
   if (!signedIn) return <main className="mail-welcome"><div className="welcome-icon"><Inbox size={26} /></div><p className="eyebrow">A LITTLE SPACE FOR YOUR INBOX</p><h1>Your mail. A clearer view.</h1><p>Connect Gmail to browse your conversations and write with a little help.</p><a className="mail-primary" href={getGmailAuthUrl(false, true)}>Connect Gmail for inbox access</a><button className="mail-text-button" onClick={onCompose}>Go to writing workspace</button></main>;
   if (loading) return <main className="mail-state" role="status">Loading your mailboxes…</main>;
   if (error) return <main className="mail-state" role="alert"><p>{error}</p><button className="mail-button" onClick={() => { setLoading(true); setError(''); setRetry(value => value + 1); }}>Retry mailboxes</button></main>;
-  if (!account) return <main className="mail-welcome"><h1>No Gmail account connected</h1><a className="mail-primary" href={getGmailAuthUrl(false, true)}>Connect Gmail for inbox access</a></main>;
+  if (!account) return <main className="mail-welcome"><h1>No Gmail account connected</h1><ConnectAccount>Connect Gmail for inbox access</ConnectAccount></main>;
   return <AccountMailbox onAccountsChange={setAccounts} key={account.id} account={account} accounts={accounts} onAccount={setSelected} onCompose={onCompose} />;
 }
 
@@ -105,13 +107,13 @@ function AccountMailbox({ account, accounts, onAccount, onCompose, onAccountsCha
       <div className="mail-toolbar"><h1>{title}</h1></div>
       {account.is_connected && account.mailbox_access && (!account.last_synced_at || account.mail_import_complete === false) && job?.status !== 'failed' && <div className="mail-sync-status"><progress aria-label="Loading your mailbox" /><span>Loading your mail…</span></div>}
       {account.is_connected && account.mailbox_access && job?.status === 'failed' && <p className="mail-notice" role="status">Mail updates are temporarily unavailable. Your existing messages are still available.</p>}
-      {(!account.is_connected || !account.mailbox_access) && <div className="mail-notice">{!account.is_connected ? 'Reconnect Gmail to update your mailbox.' : 'Allow read access to bring your Gmail messages here.'} <a href={getGmailAuthUrl(account.requires_reauth, true)}>{account.is_connected ? 'Enable inbox access' : 'Reconnect Gmail'}</a></div>}
-      {account.is_connected && account.mailbox_access && !account.modify_access && <div className="mail-notice">To mark, star, archive or trash messages, allow Gmail change access. <a href={getGmailAuthUrl(false, false, true)}>Enable mail actions</a></div>}
+      {(!account.is_connected || !account.mailbox_access) && <div className="mail-notice">{!account.is_connected ? 'Reconnect Gmail to update your mailbox.' : 'Allow read access to bring your Gmail messages here.'} <ConnectAccount accountId={account.id}>{account.is_connected ? 'Enable inbox access' : 'Reconnect Gmail'}</ConnectAccount></div>}
+      {account.is_connected && account.mailbox_access && !account.modify_access && <div className="mail-notice">To mark, star, archive or trash messages, allow Gmail change access. <ConnectAccount accountId={account.id}>Enable mail actions</ConnectAccount></div>}
       {label === 'MYBOX' && <div className="mybox-notice"><strong>Mybox</strong><p>AI-reviewed Primary mail, with suspected spam excluded. Other categories remain in their own sections.</p>{myboxStatus && <p role="status">{!myboxStatus.enabled ? 'Automatic AI review is turned off.' : !myboxStatus.configured ? 'Configure the AI provider to start automatic review.' : `${myboxStatus.pending} messages awaiting AI review.`}{myboxStatus.failed > 0 && <> {myboxStatus.failed} reviews could not finish. <button className="mail-text-button" onClick={() => { void apiRequest(`accounts/${account.id}/mybox-retry`, undefined, 'POST').then(() => setRevision(value => value + 1)).catch(() => setLabelError('Could not retry AI review. Please try again.')); }}>Retry reviews</button></>}</p>}<div className="mybox-legend" role="group" aria-label="Filter by importance">{(['critical', 'high', 'normal', 'low'] as const).map(level => <button type="button" key={level} className={`mail-importance mybox-filter ${level}`} aria-pressed={importance === level} onClick={() => setImportance(current => current === level ? null : level)}>{level[0].toUpperCase() + level.slice(1)}</button>)}</div></div>}
       <form className="mail-search" role="search" onSubmit={event => { event.preventDefault(); setQuery(search.trim()); }}><Search size={17} aria-hidden="true" /><label htmlFor="mail-search-query">Search mail</label><input id="mail-search-query" name="q" type="search" autoCapitalize="off" autoCorrect="off" spellCheck={false} aria-label="Search mail" placeholder="Search sender, subject, or message…" value={search} maxLength={200} onChange={event => setSearch(event.target.value)} /><button type="submit">Search</button>{query && <button type="button" onClick={() => { setSearch(''); setQuery(''); }}>Clear</button>}</form>
       <div className="mail-filter-bar"><span>{query ? `Results for “${query}” in ${title}` : 'Recent messages'}</span><label><input type="checkbox" checked={unread} onChange={event => setUnread(event.target.checked)} /> Unread only</label></div>
       {label === 'DRAFT' && <p className="mail-notice">Drafts saved in Gmail appear here for reading. Your writing workspace draft stays separate.</p>}
-      <MailResults key={`${label}:${unread}:${query}:${label === 'MYBOX' ? importance : ''}`} revision={revision} accountId={account.id} label={label} importance={label === 'MYBOX' ? importance : null} unread={unread} query={query} editable={Boolean(account.is_connected && account.modify_access)} sendable={Boolean(account.is_connected)} />
+      <MailResults key={`${label}:${unread}:${query}:${label === 'MYBOX' ? importance : ''}`} revision={revision} accountId={account.id} label={label} importance={label === 'MYBOX' ? importance : null} unread={unread} query={query} editable={Boolean(account.is_connected && account.modify_access)} sendable={Boolean(account.is_connected && account.send_access !== false)} />
     </section>
   </main>;
 }
@@ -170,6 +172,7 @@ function MailResults({ accountId, label, importance, unread, query, editable, se
       {error && <div className="mail-state" role="alert"><p>{error}</p><button className="mail-button" onClick={() => { setLoading(true); setError(''); setRetry(value => value + 1); }}>Retry messages</button></div>}
       {!loading && !error && page?.items.length === 0 && <div className="mail-empty"><Inbox size={32} /><h2>{query || unread || importance ? 'No matching messages' : 'Nothing here yet'}</h2><p>{query || unread || importance ? 'Try another search or clear the importance or unread filter.' : 'New messages will appear here automatically.'}</p></div>}
       {!loading && !error && page?.next_page_token && <button className="mail-button load-more" onClick={() => { setLoading(true); setPagination({ revision, token: page.next_page_token }); }}>Load more mail</button>}
+      {!loading && !error && page && !page.next_page_token && !query && !unread && label !== 'MYBOX' && <HistoryControl key={`${accountId}:${label}`} accountId={accountId} label={label} onLoaded={() => { setPagination({ revision, token: null }); setRetry(value => value + 1); }} />}
     </section>
     {selected ? <ThreadReader key={selected.thread_id} accountId={accountId} threadId={selected.thread_id} revision={revision} editable={editable} sendable={sendable} onChanged={onChanged} onBack={() => { setSelected(null); requestAnimationFrame(() => lastButton.current?.focus()); }} /> : <div className="reader-placeholder"><div className="reader-art"><Mail size={35} /></div><h2>A moment for your mail.</h2><p>Choose a message to read the conversation.</p><span>External images stay blocked for your privacy.</span></div>}
   </div>;

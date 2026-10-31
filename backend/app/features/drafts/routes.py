@@ -31,6 +31,7 @@ def draft(account_id: int, draft_id: DraftId, user: User = Depends(get_current_u
 
 
 @router.put("/{draft_id}")
+@router.patch("/{draft_id}")
 def update_draft(account_id: int, draft_id: DraftId, data: DraftInput,
                  user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return save_draft(db, user.id, account_id, data, draft_id)

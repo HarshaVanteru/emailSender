@@ -14,6 +14,20 @@ import test_mailbox_reader
 
 
 class GmailDraftTests(unittest.TestCase):
+    def test_provider_page_tokens_are_encrypted_and_bound_to_owner_and_mailbox(self):
+        from cryptography.fernet import Fernet
+        with patch('app.core.config.TOKEN_ENCRYPTION_KEY', Fernet.generate_key().decode()):
+            self.resource.list.return_value.execute.return_value = {'drafts': [], 'nextPageToken': 'provider-private-page'}
+            page = list_drafts(self.db, self.owner.id, self.account.id, service=self.provider, limiter=self.gate)
+            cursor = page['next_page_token']
+            self.assertNotIn('provider-private-page', cursor)
+            self.resource.list.return_value.execute.return_value = {'drafts': []}
+            list_drafts(self.db, self.owner.id, self.account.id, cursor, self.provider, self.gate)
+            self.assertEqual(self.resource.list.call_args.kwargs['pageToken'], 'provider-private-page')
+            with self.assertRaises(Exception) as caught:
+                list_drafts(self.db, self.owner.id, self.foreign.id, cursor, self.provider, self.gate)
+            self.assertEqual(caught.exception.status_code, 400)
+
     @classmethod
     def setUpClass(cls):
         test_mailbox_reader.MailboxReaderTests.setUpClass()

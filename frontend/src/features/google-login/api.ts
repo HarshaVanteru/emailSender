@@ -15,3 +15,10 @@ export const fetchConnectedAccounts = (signal?: AbortSignal) =>
 
 export const disconnectAccount = (accountId: number) =>
   apiRequest<void>(`accounts/${accountId}`, undefined, 'DELETE', undefined, 'Could not disconnect Gmail. Please try again.');
+
+export async function connectGmailAccount(accountId?: number) {
+  const result = await apiRequest<{ authorization_url: string }>(
+    accountId === undefined ? 'accounts/google/connect' : `accounts/${accountId}/reconnect`,
+    undefined, 'POST');
+  window.location.assign(result.authorization_url);
+}

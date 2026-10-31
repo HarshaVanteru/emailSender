@@ -12,6 +12,7 @@ const assert = require('node:assert/strict');
       let stored = null;
       const headers = { 'access-control-allow-origin': '*' };
       await page.route('**/api/v1/**', async (route) => {
+        if (route.request().method() === 'GET' && /\/accounts\/\d+\/send-jobs$/.test(new URL(route.request().url()).pathname)) return route.fulfill({ json: [] });
         const path = new URL(route.request().url()).pathname;
         const method = route.request().method();
         if (method === 'OPTIONS') return route.fulfill({ status: 204, headers: { ...headers,
@@ -29,10 +30,10 @@ const assert = require('node:assert/strict');
             body_html: data.body_html, attachments: data.attachments || [], can_edit: true, content_hash: 'a'.repeat(64), cc: '', bcc: '' };
           body = stored; status = 201;
         } else if (path.endsWith('/accounts/1/drafts/draft1') && method === 'GET') body = stored;
-        else if (path.endsWith('/accounts/1/drafts/draft1/send') && method === 'POST') {
+        else if (path.endsWith('/accounts/1/drafts/draft1/send-jobs') && method === 'POST') {
           sends++;
           assert.equal(route.request().postDataJSON().content_hash, 'a'.repeat(64));
-          body = { message_id: 'sent1' };
+          body = { id: 'send-job-1', status: 'sent', result: { message_id: 'sent1' } };
         } else if (path.endsWith('/gmail/send')) throw new Error('Saved drafts must send through Gmail drafts.send');
         else throw new Error(`Unexpected API request: ${method} ${path}`);
         await route.fulfill({ status, headers, json: body });

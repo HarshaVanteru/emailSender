@@ -7,6 +7,8 @@ import type { MailDetail, ThreadPage } from './types';
 import type { ThreadComposeMode, ThreadSendResponse } from '../compose-email/types';
 import { MailBody } from './MailBody';
 import { ThreadComposer } from '../compose-email/ThreadComposer';
+import { DownloadAttachment } from './DownloadAttachment';
+import { LabelEditor } from './LabelEditor';
 import { isPrimary } from './categories';
 import { ThreadAiPanel } from '../ai-assistant/ThreadAiPanel';
 
@@ -125,8 +127,12 @@ export function ThreadReader({ accountId, threadId, editable, sendable, onChange
           {!message.labels.includes('TRASH') && <button disabled={busyId !== null} onClick={() => { setTrashId(message.id); dialog.current?.showModal(); }}><Trash2 size={15} />Move to trash</button>}
         </div>}
         <MailBody html={message.body_html} text={message.body_text} />
-        {message.attachments.length > 0 && <div className="mail-attachments"><p className="mail-muted">Attachments · Preview and download are not available yet</p>
-          <ul>{message.attachments.map(file => <li key={file.id}><Paperclip size={14} aria-hidden="true" />{file.filename || 'Unnamed attachment'} <span>{Math.max(1, Math.round(file.size_bytes / 1024))} KB</span></li>)}</ul>
+        {editable && <LabelEditor accountId={accountId} message={message} onChanged={updated => {
+          setPage(previous => previous && { ...previous, items: previous.items.map(item => item.id === updated.id ? updated : item) });
+          onChanged(updated);
+        }} />}
+        {message.attachments.length > 0 && <div className="mail-attachments"><p className="mail-muted">Attachments · Download only when needed</p>
+          <ul>{message.attachments.map(file => <li key={file.id}><Paperclip size={14} aria-hidden="true" />{file.filename || 'Unnamed attachment'} <span>{Math.max(1, Math.round(file.size_bytes / 1024))} KB</span><DownloadAttachment accountId={accountId} attachment={file} /></li>)}</ul>
         </div>}
       </article>)}
       {error && <div className="mail-state" role="alert"><p>{error}</p><button className="mail-button" onClick={() => { setLoading(true); setError(''); setRetry(value => value + 1); }}>Retry conversation</button></div>}

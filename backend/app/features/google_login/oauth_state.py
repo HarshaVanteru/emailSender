@@ -24,9 +24,12 @@ def cookie_name(state: str) -> str:
 class OAuthAttemptData:
     verifier: str
     scopes: list[str]
+    user_id: int | None = None
+    session_id: str | None = None
+    account_id: int | None = None
 
 
-def create_attempt(db: Session, scopes=None):
+def create_attempt(db: Session, scopes=None, *, user_id=None, session_id=None, account_id=None):
     state, browser, verifier = (secrets.token_urlsafe(48) for _ in range(3))
     encrypted = encrypt(verifier)  # Fail closed before persisting anything.
     db.query(OAuthAttempt).filter(OAuthAttempt.expires_at <= now()).delete()
@@ -35,6 +38,7 @@ def create_attempt(db: Session, scopes=None):
         encrypted_verifier=encrypted,
         requested_scopes=json.dumps(scopes or GMAIL_SCOPES),
         expires_at=now() + timedelta(seconds=OAUTH_STATE_TTL_SECONDS),
+        user_id=user_id, session_id=session_id, account_id=account_id,
     ))
     db.commit()
     return state, browser, verifier
@@ -55,9 +59,10 @@ def consume_attempt(db: Session, state: str, browser: str | None) -> OAuthAttemp
     # Older attempts without saved scopes requested send-only access. Preserve
     # that original request even though new logins now request gmail.modify.
     scopes = json.loads(attempt.requested_scopes or "[]") or GMAIL_LEGACY_SCOPES
+    owner, session_id, account_id = attempt.user_id, attempt.session_id, attempt.account_id
     # Atomic conditional deletion prevents two workers redeeming the same state.
     removed = query.delete(synchronize_session=False)
     db.commit()
     if removed != 1:
         raise ValueError("Invalid or expired OAuth state")
-    return OAuthAttemptData(decrypt(encrypted), scopes)
+    return OAuthAttemptData(decrypt(encrypted), scopes, owner, session_id, account_id)

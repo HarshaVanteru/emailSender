@@ -1,14 +1,17 @@
 import type { SendEmailPayload, SendEmailResponse, ThreadComposeMode, ThreadComposePreview, ThreadSendPayload, ThreadSendResponse } from './types';
 import { apiRequest } from '../../shared/api/client';
+import { submitSend } from '../../shared/api/jobs';
 
 export const fetchThreadCompose = (accountId: number, messageId: number, mode: ThreadComposeMode) =>
   apiRequest<ThreadComposePreview>(`accounts/${accountId}/messages/${messageId}/compose?mode=${mode}`);
 
 export const sendThreadMessage = (accountId: number, messageId: number, payload: ThreadSendPayload) =>
-  apiRequest<ThreadSendResponse>(`accounts/${accountId}/messages/${messageId}/send`, undefined, 'POST', payload);
+  submitSend<ThreadSendResponse>(accountId, `accounts/${accountId}/messages/${messageId}/send-jobs`, payload);
 
-export const sendEmail = (payload: SendEmailPayload) =>
-  apiRequest<SendEmailResponse>('gmail/send', undefined, 'POST', payload, 'Email dispatch failed. Check Gmail Sent before trying again.');
+export const sendEmail = (payload: SendEmailPayload) => {
+  if (!payload.account_id) return Promise.reject(new Error('Choose a sending account.'));
+  return submitSend<SendEmailResponse>(payload.account_id, `accounts/${payload.account_id}/emails/send`, payload);
+};
 
 export function readFileAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {

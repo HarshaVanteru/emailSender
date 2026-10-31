@@ -2,6 +2,7 @@ import React from 'react';
 import { Mail, PenLine, RefreshCw, ExternalLink, AlertCircle, Settings, Sun, Moon } from 'lucide-react';
 import type { GmailProfile } from '../../features/profile/types';
 import { getGmailAuthUrl } from '../../features/google-login/api';
+import { ConnectAccount } from '../../features/google-login/ConnectAccount';
 
 interface HeaderProps {
   profile: GmailProfile | null;
@@ -65,7 +66,7 @@ export const Header: React.FC<HeaderProps> = ({ profile, checkingAuth, onRefresh
                 <RefreshCw className="w-3 h-3" />
               </button>
             </div>
-            {!profile.is_connected && <a href={getGmailAuthUrl(true)} className="text-xs text-indigo-600 font-medium">Reconnect</a>}
+            {!profile.is_connected && <ConnectAccount>Reconnect</ConnectAccount>}
             {onOpenSettings && (
               <button 
                 onClick={onOpenSettings}

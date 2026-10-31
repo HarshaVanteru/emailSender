@@ -4,6 +4,7 @@ One account row lock serializes sync writers. A single transaction commits cache
 changes and its cursor. Provider failures roll back both, then mark the job failed.
 """
 import json
+from datetime import timedelta, timezone
 from contextlib import contextmanager
 from contextvars import ContextVar
 
@@ -17,6 +18,7 @@ from app.features.mailbox.models import AuditLog, EmailAttachment, EmailLabel, E
 from app.features.google_login.accounts import credentials_for_account
 from app.integrations.gmail.mime import InvalidMessage, normalize_message, provider_id
 from app.integrations.gmail.client import gmail_service
+from app.integrations.gmail.adapter import GmailAdapter
 
 READ_SCOPES = {"https://mail.google.com/", "https://www.googleapis.com/auth/gmail.readonly",
                "https://www.googleapis.com/auth/gmail.modify"}
@@ -84,11 +86,11 @@ def changed_messages(service, cursor):
     changed, page_tokens = set(), set()
     token = None
     for _ in range(MAX_HISTORY_PAGES):
-        options = {"userId": "me", "startHistoryId": cursor, "maxResults": 600}
+        options = {"startHistoryId": cursor, "maxResults": 600}
         if token:
             options["pageToken"] = token
         try:
-            page = execute(service.users().history().list(**options))
+            page = execute(GmailAdapter(service).history(**options))
         except HttpError as exc:
             if exc.resp.status == 404:
                 raise HistoryExpired() from None
@@ -112,9 +114,12 @@ def changed_messages(service, cursor):
 
 
 def reconciliation_messages(db, service, account):
-    """Read one resumable page of every Gmail message, without a date cutoff."""
+    """Read one page inside a fixed recent window. Older history is explicit."""
+    if account.repair_after_id is not None:
+        changed = repair_cached_page(db, account)
+        return changed, history_cursor(account.mail_import_history_id)
     if account.mail_import_started_at is None:
-        profile = execute(service.users().getProfile(userId="me"))
+        profile = execute(GmailAdapter(service).profile())
         if profile.get("emailAddress", "").lower() != account.gmail_email.lower():
             raise SyncFailure("mailbox_identity_mismatch", 409)
         # Replay changes from BEFORE the first page only after the scan finishes.
@@ -123,12 +128,13 @@ def reconciliation_messages(db, service, account):
         account.mail_import_page_token = None
         account.mail_import_seen_tokens = []
         account.mail_import_complete = False
-    options = {"userId": "me", "maxResults": PAGE_SIZE, "includeSpamTrash": True}
+    cutoff = int((account.mail_import_started_at - timedelta(days=account.initial_sync_days)).replace(tzinfo=timezone.utc).timestamp())
+    options = {"maxResults": PAGE_SIZE, "includeSpamTrash": True, "q": f"after:{cutoff}"}
     token = account.mail_import_page_token
     if token:
         options["pageToken"] = token
     try:
-        page = execute(service.users().messages().list(**options))
+        page = execute(GmailAdapter(service).list_messages(**options))
     except HttpError as exc:
         if token and exc.resp.status in (400, 404):
             # Gmail page tokens can expire. Restart the listing safely; cached
@@ -145,11 +151,27 @@ def reconciliation_messages(db, service, account):
         account.mail_import_seen_tokens = [*seen, next_token]
     account.mail_import_page_token = next_token
     account.mail_import_complete = not next_token
+    if not next_token and account.history_id:
+        # Repair previously imported mail explicitly; absence from a limited
+        # recent listing never proves a provider deletion.
+        account.repair_after_id = 0
+        changed.update(repair_cached_page(db, account))
     return changed, history_cursor(account.mail_import_history_id)
 
 
+def repair_cached_page(db, account):
+    rows = db.query(EmailMessage.id, EmailMessage.gmail_message_id).filter(
+        EmailMessage.account_id == account.id, EmailMessage.id > account.repair_after_id
+    ).order_by(EmailMessage.id).limit(PAGE_SIZE + 1).all()
+    more = len(rows) > PAGE_SIZE
+    rows = rows[:PAGE_SIZE]
+    account.repair_after_id = rows[-1][0] if more else None
+    account.mail_import_complete = not more
+    return {row[1] for row in rows}
+
+
 def refresh_labels(db, service, account_id):
-    items = execute(service.users().labels().list(userId="me"))["labels"]
+    items = execute(GmailAdapter(service).labels())["labels"]
     existing = {label.gmail_label_id: label for label in db.query(EmailLabel).filter_by(account_id=account_id).all()}
     seen = set()
     for item in items:
@@ -182,12 +204,16 @@ def remove_message(db, account_id, gmail_id, affected_threads):
 
 
 def upsert_message(db, account_id, data, labels, affected_threads):
+    message = db.query(EmailMessage).filter_by(account_id=account_id, gmail_message_id=data["gmail_message_id"]).first()
+    inserted = message is None
+    if (message is not None and message.gmail_history_id and data.get("gmail_history_id")
+            and int(data["gmail_history_id"]) < int(message.gmail_history_id)):
+        return  # Reject stale snapshots before creating any new thread/label rows.
     thread = db.query(EmailThread).filter_by(account_id=account_id, gmail_thread_id=data["gmail_thread_id"]).first()
     if thread is None:
         thread = EmailThread(account_id=account_id, gmail_thread_id=data["gmail_thread_id"])
         db.add(thread)
         db.flush()
-    message = db.query(EmailMessage).filter_by(account_id=account_id, gmail_message_id=data["gmail_message_id"]).first()
     if message is None:
         message = EmailMessage(account_id=account_id, thread_id=thread.id)
         db.add(message)
@@ -200,6 +226,7 @@ def upsert_message(db, account_id, data, labels, affected_threads):
         setattr(message, field, data[field])
     message.cached_at = utcnow()
     db.flush()
+
     db.query(MessageLabel).filter_by(account_id=account_id, message_id=message.id).delete(synchronize_session=False)
     for gmail_id in data["labels"]:
         if gmail_id not in labels:
@@ -227,6 +254,7 @@ def upsert_message(db, account_id, data, labels, affected_threads):
     for part_id in set(existing) - seen:
         db.delete(existing[part_id])
     db.flush()
+    return 'inserted' if inserted else 'updated'
 
 
 def refresh_threads(db, account_id, affected):
@@ -241,7 +269,7 @@ def refresh_threads(db, account_id, affected):
     db.flush()
 
 
-def apply_sync(db, account, service, reconcile=False):
+def apply_sync(db, account, service, reconcile=False, progress=None):
     """Apply a complete sync without committing; caller owns locks/transaction."""
     account_id = account.id
     if account.history_id and account.mail_import_complete and not reconcile:
@@ -261,13 +289,29 @@ def apply_sync(db, account, service, reconcile=False):
     else:
         kind = "reconcile" if reconcile else "initial"
         changed, cursor = reconciliation_messages(db, service, account)
+        if account.history_id and not account.mail_import_complete:
+            # New mail keeps moving while a recent-window scan is paginated.
+            try:
+                updates, current = changed_messages(service, account.history_id)
+                changed.update(updates)
+                cursor = max((cursor, current), key=int)
+            except HistoryExpired:
+                # Expiration during a paginated repair needs a fresh repair
+                # baseline, never a silent cursor reset or regression.
+                account.mail_import_started_at = None
+                account.repair_after_id = None
+                extra, cursor = reconciliation_messages(db, service, account)
+                changed.update(extra)
     if account.history_id and int(cursor) < int(account.history_id):
         raise SyncFailure("history_cursor_regressed")
     labels = refresh_labels(db, service, account_id)
     affected_threads = set()
+    if progress is None:
+        progress = {'seen': 0, 'inserted': 0, 'updated': 0}
     for gmail_id in sorted(changed):
+        progress['seen'] += 1
         try:
-            raw = execute(service.users().messages().get(userId="me", id=gmail_id, format="full"))
+            raw = execute(GmailAdapter(service).message(gmail_id))
         except HttpError as exc:
             if exc.resp.status == 404:
                 remove_message(db, account_id, gmail_id, affected_threads)
@@ -276,22 +320,17 @@ def apply_sync(db, account, service, reconcile=False):
         if raw.get("id") != gmail_id:
             raise InvalidMessage("message_identity_mismatch")
         def load_body(attachment_id):
-            return execute(service.users().messages().attachments().get(
-                userId="me", messageId=gmail_id, id=attachment_id))["data"]
-        upsert_message(db, account_id, normalize_message(raw, load_body), labels, affected_threads)
+            return execute(GmailAdapter(service).attachment(gmail_id, attachment_id))["data"]
+        outcome = upsert_message(db, account_id, normalize_message(raw, load_body), labels, affected_threads)
+        if outcome:
+            progress[outcome] += 1
     if account.mail_import_complete and account.mail_import_started_at is not None:
-        # Only a completed all-mail listing can evict messages not encountered.
-        stale = db.query(EmailMessage.gmail_message_id).filter(
-            EmailMessage.account_id == account_id,
-            EmailMessage.cached_at < account.mail_import_started_at).all()
-        for (gmail_id,) in stale:
-            remove_message(db, account_id, gmail_id, affected_threads)
+        # A recent listing is not an authoritative full-mailbox deletion set.
         account.mail_import_started_at = None
         account.mail_import_history_id = None
         account.mail_import_seen_tokens = None
     refresh_threads(db, account_id, affected_threads)
-    if account.mail_import_complete:
-        account.history_id = cursor
+    account.history_id = cursor
     account.last_synced_at = utcnow()
     return kind
 
@@ -300,7 +339,8 @@ def job_payload(job):
     return {"id": job.id, "account_id": job.account_id, "kind": job.kind, "status": job.status,
             "attempts": job.attempts, "created_at": job.created_at, "started_at": job.started_at,
             "finished_at": job.finished_at, "error_code": job.error_code,
-            "available_at": job.available_at}
+            "available_at": job.available_at, "messages_seen": job.messages_seen,
+            "messages_inserted": job.messages_inserted, "messages_updated": job.messages_updated}
 
 
 def synchronize(db, user_id: int, account_id: int, reconcile=False, service=None):
@@ -319,7 +359,9 @@ def synchronize(db, user_id: int, account_id: int, reconcile=False, service=None
         check_read_access(account)
         if service is None:
             service = gmail_service.get_gmail_service(credentials.to_json())
-        kind = apply_sync(db, account, service, reconcile)
+        progress = {'seen': 0, 'inserted': 0, 'updated': 0}
+        kind = apply_sync(db, account, service, reconcile, progress)
+        job.messages_seen, job.messages_inserted, job.messages_updated = progress['seen'], progress['inserted'], progress['updated']
         job.kind, job.status, job.finished_at = kind, "succeeded", utcnow()
         db.add(AuditLog(user_id=user_id, account_id=account_id, action="mailbox.sync", resource_type="sync_job",
                         resource_id=str(job_id), outcome="success"))

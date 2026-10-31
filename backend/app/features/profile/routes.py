@@ -13,14 +13,17 @@ router = APIRouter(prefix="/gmail", tags=["profile"])
 @router.get("/profile")
 def get_profile(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     account = account_service.find_account(db, current_user)
+    from app.features.google_login.models import ConnectedAccount
+    connected = db.query(ConnectedAccount).filter(ConnectedAccount.user_id == current_user.id,
+        ConnectedAccount.encrypted_credentials.is_not(None), ConnectedAccount.requires_reauth.is_(False)).first()
     return {
         "email": current_user.email,
         "name": current_user.name,
         "signature": current_user.signature,
         "preferences": current_user.preferences,
         "bio": current_user.bio,
-        "is_connected": bool(account and account.encrypted_credentials and not account.requires_reauth),
-        "requires_reauth": bool(account and account.requires_reauth),
+        "is_connected": connected is not None,
+        "requires_reauth": bool(not connected and account and account.requires_reauth),
     }
 
 

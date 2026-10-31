@@ -15,6 +15,9 @@ from app.core.config import GMAIL_COMPOSE_SCOPE, GMAIL_MODIFY_SCOPE
 from app.features.mailbox.models import AuditLog
 from app.features.google_login.accounts import credentials_for_account
 from app.integrations.gmail.client import gmail_service
+from app.integrations.gmail.adapter import GmailAdapter
+from app.core.token_crypto import encrypt, decrypt
+from cryptography.fernet import InvalidToken
 from app.integrations.gmail.text import html_to_text
 from app.features.mail_sync.service import owned_account, utcnow
 from app.workers.rate_limit import GmailRateLimiter
@@ -115,7 +118,7 @@ def get_draft(db, user_id, account_id, draft_id, service=None, limiter=None):
     gate = limiter or GmailRateLimiter()
     try:
         gate.wait(account_id)
-        result = service.users().drafts().get(userId="me", id=draft_id, format="raw").execute(num_retries=0)
+        result = GmailAdapter(service).draft(draft_id).execute(num_retries=0)
     except (HttpError, RedisError, OSError) as exc:
         raise provider_error(exc) from None
     if result.get("id") != draft_id:
@@ -125,19 +128,24 @@ def get_draft(db, user_id, account_id, draft_id, service=None, limiter=None):
 
 
 def list_drafts(db, user_id, account_id, page_token=None, service=None, limiter=None):
+    if page_token:
+        try:
+            cursor = json.loads(decrypt(page_token, ttl=3600))
+            if cursor['user_id'] != user_id or cursor['account_id'] != account_id or cursor['kind'] != 'drafts':
+                raise ValueError()
+            page_token = cursor['provider_token']
+        except (InvalidToken, ValueError, TypeError, KeyError):
+            raise HTTPException(400, 'Invalid or expired draft page cursor for this account.') from None
     service = get_service(db, user_id, account_id, service)
     gate = limiter or GmailRateLimiter()
     try:
         gate.wait(account_id)
-        options = {"userId": "me", "maxResults": 20}
-        if page_token:
-            options["pageToken"] = page_token
-        result = service.users().drafts().list(**options).execute(num_retries=0)
+        result = GmailAdapter(service).list_drafts(page_token).execute(num_retries=0)
         items = []
         for draft in result.get("drafts", [])[:20]:
             draft_id = provider_id(draft.get("id"))
             gate.wait(account_id)
-            details = service.users().drafts().get(userId="me", id=draft_id, format="metadata").execute(num_retries=0)
+            details = GmailAdapter(service).draft_metadata(draft_id).execute(num_retries=0)
             if details.get("id") != draft_id:
                 raise HTTPException(502, "Gmail returned an inconsistent draft list. Refresh it.")
             message = details.get("message", {})
@@ -146,7 +154,10 @@ def list_drafts(db, user_id, account_id, page_token=None, service=None, limiter=
                           "snippet": message.get("snippet", "")})
     except (HttpError, RedisError, OSError) as exc:
         raise provider_error(exc) from None
-    return {"items": items, "next_page_token": result.get("nextPageToken")}
+    token = result.get('nextPageToken')
+    cursor = encrypt(json.dumps({'kind': 'drafts', 'user_id': user_id, 'account_id': account_id,
+                                  'provider_token': token})) if token else None
+    return {"items": items, "next_page_token": cursor}
 
 
 def save_draft(db, user_id, account_id, data, draft_id=None, service=None, limiter=None):
@@ -170,9 +181,7 @@ def save_draft(db, user_id, account_id, data, draft_id=None, service=None, limit
                                            cc=data.cc, bcc=data.bcc, body_html=data.body_html,
                                            attachments=[item.model_dump() for item in data.attachments])
         gate.wait(account_id)
-        resource = service.users().drafts()
-        result = (resource.update(userId="me", id=draft_id, body={"id": draft_id, "message": {"raw": raw}})
-                  if draft_id else resource.create(userId="me", body={"message": {"raw": raw}})).execute(num_retries=0)
+        result = GmailAdapter(service).save_draft(raw, draft_id).execute(num_retries=0)
         new_id = provider_id(result.get("id"))
         if draft_id and new_id != draft_id:
             raise HTTPException(502, "Gmail returned a different draft. Refresh your drafts.")
@@ -189,7 +198,7 @@ def save_draft(db, user_id, account_id, data, draft_id=None, service=None, limit
         raise provider_error(exc) from None
 
 
-def send_draft(db, user_id, account_id, draft_id, content_hash, service=None, limiter=None):
+def _send_draft(db, user_id, account_id, draft_id, content_hash, service=None, limiter=None):
     service = get_service(db, user_id, account_id, service)
     gate = limiter or GmailRateLimiter()
     try:
@@ -203,7 +212,7 @@ def send_draft(db, user_id, account_id, draft_id, content_hash, service=None, li
         if not (current["to"] or current["cc"] or current["bcc"]) or not current["subject"] or not current["body"].strip():
             raise HTTPException(422, "Complete the recipient, subject and body before sending.")
         gate.wait(account_id)
-        result = service.users().drafts().send(userId="me", body={"id": draft_id}).execute(num_retries=0)
+        result = GmailAdapter(service).send_draft(draft_id).execute(num_retries=0)
         message_id = result.get("id")
         if not isinstance(message_id, str) or not message_id:
             raise HTTPException(502, "Gmail could not confirm delivery. Check Sent before trying again.")
@@ -226,10 +235,19 @@ def discard_draft(db, user_id, account_id, draft_id, content_hash, service=None,
         if current["content_hash"] != content_hash:
             raise HTTPException(409, "This draft changed elsewhere. Reload it before discarding.")
         gate.wait(account_id)
-        service.users().drafts().delete(userId="me", id=draft_id).execute(num_retries=0)
+        GmailAdapter(service).delete_draft(draft_id).execute(num_retries=0)
         db.add(AuditLog(user_id=user_id, account_id=account_id, action="draft.discard",
                         resource_type="gmail_draft", resource_id=draft_id, outcome="success"))
         db.commit()
     except (HttpError, RedisError, OSError, OperationalError) as exc:
         db.rollback()
         raise provider_error(exc) from None
+
+
+def send_draft(db, user_id, account_id, draft_id, content_hash, service=None, limiter=None):
+    check_draft_access(owned_account(db, user_id, account_id))
+    from app.features.compose_email.inline_receipt import receipt
+    with receipt(db, user_id, account_id, 'legacy_draft', {'draft_id': draft_id, 'content_hash': content_hash}) as record:
+        result = _send_draft(db, user_id, account_id, draft_id, content_hash, service, limiter)
+        record.update(result)
+        return result

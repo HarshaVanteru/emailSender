@@ -1,9 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { disconnectAccount, fetchConnectedAccounts, getGmailAuthUrl } from '../google-login/api';
+import { disconnectAccount, fetchConnectedAccounts, connectGmailAccount } from '../google-login/api';
 import { updateProfile } from './api';
 import type { ConnectedAccount } from '../google-login/types';
 import type { GmailProfile } from './types';
 import { X, Check } from 'lucide-react';
+import { apiRequest } from '../../shared/api/client';
+import { logout } from '../google-login/session';
+import { AccountDiagnostics } from './AccountDiagnostics';
 
 interface ProfileSettingsProps {
   profile: GmailProfile | null;
@@ -24,6 +27,16 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onClo
   const [connectionError, setConnectionError] = useState('');
   const [confirmDisconnect, setConfirmDisconnect] = useState<number | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+  const handleConnect = async (accountId?: number) => {
+    setConnecting(true);
+    setConnectionError('');
+    try { await connectGmailAccount(accountId); }
+    catch (error) {
+      setConnectionError(error instanceof Error ? error.message : 'Could not start connection.');
+      setConnecting(false);
+    }
+  };
   const dialogRef = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -116,10 +129,11 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onClo
                     </div>
                   </div>
                 )}
-                {!account.is_connected && <a href={getGmailAuthUrl(true)} className="inline-block text-xs font-medium text-indigo-600">Reconnect Gmail</a>}
+                {!account.is_connected && <button type="button" disabled={connecting} onClick={() => void handleConnect(account.id)} className="inline-block text-xs font-medium text-indigo-600">Reconnect Gmail</button>}
+                <AccountDiagnostics accountId={account.id} />
               </div>
             ))}
-            {!loadingAccounts && !connectionError && accounts.length === 0 && <a href={getGmailAuthUrl()} className="inline-block mt-2 text-xs text-indigo-600">Connect Gmail</a>}
+            {!loadingAccounts && <button type="button" disabled={connecting} onClick={() => void handleConnect()} className="inline-block mt-2 text-xs text-indigo-600">{connecting ? 'Connecting...' : 'Add Gmail account'}</button>}
           </section>
           
           <div>
@@ -184,6 +198,10 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onClo
         {error && <p role="alert" className="px-5 py-2 text-sm text-rose-600">{error}</p>}
         {saved && <p role="status" className="px-5 py-2 text-sm text-emerald-600">Your writing preferences have been saved.</p>}
         <div className="px-5 py-3 border-t border-zinc-200 bg-zinc-50 flex justify-end gap-2 dark:border-zinc-800 dark:bg-zinc-950">
+          <button type="button" onClick={() => {
+            void apiRequest('auth/logout', undefined, 'POST').then(() => { logout(); window.location.reload(); })
+              .catch(reason => setError(reason instanceof Error ? reason.message : 'Could not sign out.'));
+          }}>Sign out</button>
           <button 
             onClick={onClose}
             className="px-3.5 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-100 rounded transition-colors dark:text-zinc-300 dark:hover:bg-zinc-800"

@@ -9,12 +9,15 @@ from fastapi import HTTPException
 from google.auth.transport.requests import Request
 from google.oauth2 import id_token
 from sqlalchemy import or_
+from sqlalchemy.exc import IntegrityError
+from app.features.mail_sync.push_models import PushEvent
 
 from app.core import config
 from app.core.database import SessionLocal
 from app.features.google_login.models import ConnectedAccount
 from app.features.google_login.accounts import credentials_for_account
 from app.integrations.gmail.client import gmail_service
+from app.integrations.gmail.adapter import GmailAdapter
 from app.features.mail_sync.service import SyncFailure, check_read_access, history_cursor, owned_account, utcnow
 from app.features.mail_sync.jobs import dispatch_job, enqueue_sync
 from app.workers.rate_limit import GmailRateLimiter
@@ -47,14 +50,14 @@ def verify_push_token(authorization):
         raise HTTPException(401, "Invalid push authentication.")
 
 
-def parse_push(body):
+def parse_push(body, *, include_id=False):
     try:
         envelope = json.loads(body)
         if (not isinstance(envelope, dict) or envelope.get("subscription") != config.PUBSUB_SUBSCRIPTION
                 or not isinstance(envelope.get("message"), dict)):
             raise ValueError()
         message = envelope["message"]
-        if not isinstance(message.get("messageId"), str) or not message["messageId"]:
+        if not isinstance(message.get("messageId"), str) or not 0 < len(message["messageId"]) <= 255:
             raise ValueError()
         encoded = message["data"]
         if not isinstance(encoded, str) or len(encoded) > 8192:
@@ -67,26 +70,52 @@ def parse_push(body):
         if (not isinstance(email, str) or len(email) > 255 or "@" not in email
                 or not cursor.isdecimal()):
             raise ValueError()
-        return email.lower(), cursor
+        return (email.lower(), cursor, message["messageId"]) if include_id else (email.lower(), cursor)
     except (ValueError, TypeError, KeyError, UnicodeDecodeError, binascii.Error, SyncFailure):
         raise HTTPException(400, "Invalid Pub/Sub push envelope.") from None
 
 
-def accept_notification(db, email, cursor):
+def accept_notification(db, email, cursor, message_id=None):
     # Wait for an in-flight cache transaction, then re-read its committed cursor.
     # A notification newer than that cursor must create a follow-up job rather
     # than disappear into the job that just completed.
     account = db.query(ConnectedAccount).filter_by(gmail_email=email).populate_existing().with_for_update().first()
+    if message_id:
+        if db.query(PushEvent.id).filter_by(pubsub_message_id=message_id).first():
+            db.rollback()
+            return
+        event = PushEvent(account_id=account.id if account else None,
+                          pubsub_message_id=message_id, history_id=cursor,
+                          received_at=utcnow(), status="pending")
+        try:
+            with db.begin_nested():
+                db.add(event)
+                db.flush()
+        except IntegrityError:
+            db.rollback()
+            return
+    else:
+        event = None  # Compatibility for internal callers without an envelope.
     if account is None or account.sync_paused:
+        if event:
+            event.status, event.processed_at = "ignored", utcnow()
+            db.commit()
         return
     try:
         check_read_access(account)
     except HTTPException:
+        if event:
+            event.status, event.processed_at = "ignored", utcnow()
+            db.commit()
         return
     if account.history_id and int(cursor) <= int(account.history_id):
+        if event:
+            event.status, event.processed_at = "processed", utcnow()
+            db.commit()
         return
     # A notification is only a hint. The worker reads Gmail and owns history_id.
     job = enqueue_sync(db, account.user_id, account.id)
+    db.commit()  # A reused active job must still durably accept the new event.
     dispatch_job(db, job.id)
 
 
@@ -101,7 +130,7 @@ def renew_watch(db, user_id, account_id, *, service=None, limiter=None):
             service = gmail_service.get_gmail_service(credentials.to_json())
         gate = limiter if limiter is not None else GmailRateLimiter()
         gate.wait(account_id)
-        result = service.users().watch(userId="me", body={"topicName": config.GMAIL_PUSH_TOPIC}).execute(num_retries=0)
+        result = GmailAdapter(service).watch(config.GMAIL_PUSH_TOPIC).execute(num_retries=0)
         expires_ms = int(result["expiration"])
         history_cursor(result["historyId"])
         expires = datetime.fromtimestamp(expires_ms / 1000, timezone.utc).replace(tzinfo=None)
@@ -109,6 +138,7 @@ def renew_watch(db, user_id, account_id, *, service=None, limiter=None):
             raise ValueError("Invalid watch expiration")
         account = owned_account(db, user_id, account_id, lock=True)
         account.watch_expiration = expires
+        account.watch_last_error_code = None
         account.next_watch_attempt_at = max(utcnow() + timedelta(hours=1),
                                             min(utcnow() + timedelta(days=1), expires - timedelta(days=1)))
         db.commit()
@@ -118,6 +148,7 @@ def renew_watch(db, user_id, account_id, *, service=None, limiter=None):
         try:
             account = owned_account(db, user_id, account_id, lock=True)
             account.next_watch_attempt_at = utcnow() + timedelta(hours=1)
+            account.watch_last_error_code = 'watch_renewal_failed'
             db.commit()
         except Exception:
             db.rollback()

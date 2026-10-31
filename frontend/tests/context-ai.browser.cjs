@@ -15,6 +15,7 @@ const assert = require('node:assert/strict');
       const detail = { ...summary, to_addresses: [{ name: 'Owner', email: 'owner@example.com' }],
         cc_addresses: [], body_text: 'Please send the notes by Friday.', body_html: null, attachments: [] };
       await page.route('**/api/v1/**', async route => {
+        if (route.request().method() === 'GET' && /\/accounts\/\d+\/send-jobs$/.test(new URL(route.request().url()).pathname)) return route.fulfill({ json: [] });
         const path = new URL(route.request().url()).pathname, method = route.request().method();
         const headers = { 'access-control-allow-origin': '*' };
         if (method === 'OPTIONS') return route.fulfill({ status: 204, headers: { ...headers,
@@ -42,7 +43,7 @@ const assert = require('node:assert/strict');
             classify: { category: 'work', priority: 'normal', reason: 'Project discussion' },
           };
           body = { id: stored.length + 1, message_id: 1, operation, result: results[operation], created_at: '2026-10-10T05:00:00' };
-          stored.unshift(body); status = 201;
+          stored.unshift(body); body = { id: 'ai-job-' + body.id, status: 'completed', result: body }; status = 202;
         } else if (path.endsWith('/messages/1/compose')) body = { mode: 'reply', to: ['alex@example.com'], cc: [],
           subject: 'Re: Project update', body: '', context_hash: 'a'.repeat(64), original_attachments: 0 };
         else if (path.endsWith('/messages/1/send') || path.endsWith('/gmail/send')) {

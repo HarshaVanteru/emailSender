@@ -105,3 +105,27 @@ def retry_mybox(account_id: int, user: User = Depends(get_current_user), db: Ses
         {"state": "retry", "attempts": 0, "available_at": utcnow(), "updated_at": utcnow()}, synchronize_session=False)
     db.commit()
     return {"queued": count}
+
+
+@router.get('/accounts/{account_id}/attachments/{attachment_id}')
+def download_attachment(account_id: int, attachment_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.features.mailbox.attachments import download
+    return download(db, user.id, account_id, attachment_id)
+
+
+@router.get('/accounts/{account_id}/emails', response_model=MailPage)
+def account_emails(account_id: int, label: str | None = Query(default=None, max_length=128),
+                   cursor: str | None = Query(default=None, max_length=1024),
+                   limit: int = Query(default=30, ge=1, le=100),
+                   user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return mailbox_reader.list_messages(db, user.id, account_id, label=label, page_size=limit, page_token=cursor)
+
+
+@router.get('/accounts/{account_id}/emails/{email_id}', response_model=MailDetail)
+def account_email(account_id: int, email_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return mailbox_reader.read_message(db, user.id, account_id, email_id)
+
+
+@router.get('/accounts/{account_id}/threads/{thread_id}', response_model=ThreadPage)
+def account_thread(account_id: int, thread_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return mailbox_reader.read_thread(db, user.id, account_id, thread_id)

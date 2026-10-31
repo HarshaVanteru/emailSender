@@ -3,7 +3,9 @@ import { Send, Copy, RotateCcw, Paperclip, Trash2, X } from 'lucide-react';
 import type { ConnectedAccount } from '../google-login/types';
 import type { GeneratedEmail, SendEmailPayload } from './types';
 import type { GmailDraftDetail, GmailDraftSummary } from '../drafts/types';
-import { fetchConnectedAccounts, getGmailAuthUrl } from '../google-login/api';
+import { fetchConnectedAccounts } from '../google-login/api';
+import { ConnectAccount } from '../google-login/ConnectAccount';
+import { SendHistory } from './SendHistory';
 import { discardGmailDraft, getGmailDraft, listGmailDrafts, saveGmailDraft, sendGmailDraft } from '../drafts/api';
 import { readFileAsBase64, sendEmail } from './api';
 import { RichTextEditor } from './RichTextEditor';
@@ -62,7 +64,8 @@ export function EmailComposer({ draft, signature = '', onChangeDraft, onResetDra
   const sendingTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const saving = useRef(false);
   const selected = accounts.find(account => account.id === accountId);
-  const canUseDrafts = Boolean(selected?.draft_access || selected?.modify_access);
+  const canSend = Boolean(selected?.is_connected && !selected.requires_reauth && selected.send_access !== false);
+  const canUseDrafts = Boolean(selected?.is_connected && (selected.draft_access || selected.modify_access));
   const currentKey = fingerprint(draft, files);
   const currentKeyRef = useRef(currentKey);
   useEffect(() => { currentKeyRef.current = currentKey; }, [currentKey]);
@@ -190,7 +193,7 @@ export function EmailComposer({ draft, signature = '', onChangeDraft, onResetDra
     } catch { setError('Copy is unavailable. Select and copy the draft text manually.'); }
   }
   async function openReview() {
-    if (busy || saving.current || !accountId || !isGmailConnected) return;
+    if (busy || saving.current || !accountId || !canSend) return;
     if (!form.current?.reportValidity()) { setViewMode('edit'); return; }
     if (!(draft.to.trim() || draft.cc?.trim() || draft.bcc?.trim()) || !draft.body.trim() || !draft.subject.trim()) {
       setError('Complete the recipients, subject, and message before sending.'); setViewMode('edit'); return;
@@ -249,6 +252,7 @@ export function EmailComposer({ draft, signature = '', onChangeDraft, onResetDra
 
   return <section aria-label="Email composer" className="composer-panel flex flex-col h-full">
     <div className="composer-title"><div><h2>Write an email</h2></div><span className="draft-badge"><span />{hasContent ? 'Draft in progress' : 'Fresh page'}</span></div>
+    {accountId && <SendHistory key={accountId} accountId={accountId} />}
     <form ref={form} id="email-form" className="composer-form" onSubmit={event => { event.preventDefault(); void openReview(); }}>
       <div className="composer-toolbar flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2"><button type="button" aria-pressed={viewMode === 'edit'} onClick={() => setViewMode('edit')}>Edit</button><button type="button" aria-pressed={viewMode === 'preview'} onClick={() => setViewMode('preview')}>Preview</button><span className="mail-muted text-xs">{wordCount} words</span></div>
@@ -264,7 +268,7 @@ export function EmailComposer({ draft, signature = '', onChangeDraft, onResetDra
           clearLocal(); setAccountId(Number(event.target.value)); setGmailDrafts([]);
         }}><option value="" disabled>Choose account</option>{accounts.map(account => <option key={account.id} value={account.id}>{account.email}</option>)}</select>
         {canUseDrafts ? <><button type="button" disabled={busy || isSaving} onClick={() => { void loadDrafts(); }}>Gmail drafts</button><label className="compose-autosave"><input type="checkbox" checked={autosave} disabled={busy} onChange={event => setAutosave(event.target.checked)} />Autosave</label><span role="status">{isSaving ? 'Saving...' : hasContent && changed ? 'Unsaved changes' : loadedDraft ? 'Saved' : ''}</span></>
-          : selected && <a href={getGmailAuthUrl(true, false, false, true)}>Enable draft autosave</a>}
+          : selected && <ConnectAccount accountId={selected.id}>Enable draft autosave</ConnectAccount>}
       </div>
       {gmailDrafts.length > 0 && <div aria-label="Gmail drafts" className="compose-draft-list">{gmailDrafts.map(item => <button key={item.id} type="button" disabled={busy || isSaving} onClick={() => { void openDraft(item.id); }}>{item.subject || '(No subject)'} - {item.to || '(No recipient)'}</button>)}</div>}
       {loadedDraft?.can_edit === false && <div className="compose-feedback">This draft contains content this editor cannot preserve. Create an editable copy to send from here, or open the original in Gmail. <button type="button" disabled={busy || isSaving} onClick={createEditableCopy}>Create editable copy</button> <a href="https://mail.google.com/mail/u/0/#drafts" target="_blank" rel="noopener noreferrer">Open in Gmail</a></div>}
@@ -280,10 +284,10 @@ export function EmailComposer({ draft, signature = '', onChangeDraft, onResetDra
         </div>
       </div>
     </form>
-    <div className="composer-footer flex items-center justify-between shrink-0"><div>{!isGmailConnected && <a href={getGmailAuthUrl()}>Connect Gmail to send</a>}</div><div className="flex items-center gap-2">
+    <div className="composer-footer flex items-center justify-between shrink-0"><div>{!canSend && <ConnectAccount accountId={accountId ?? undefined}>Connect Gmail to send</ConnectAccount>}</div><div className="flex items-center gap-2">
       {canUseDrafts && <button type="button" disabled={busy || isSaving || loadedDraft?.can_edit === false} onClick={() => { void save(); }}>Save to Gmail</button>}
       <button type="button" aria-label="Discard draft" title="Discard draft" disabled={busy || isSaving} onClick={() => { void discard(); }}><Trash2 size={17} /></button>
-      <button type="submit" form="email-form" disabled={busy || isSaving || !isGmailConnected || !accountId || loadedDraft?.can_edit === false}><span>{preparingReview ? 'Preparing...' : 'Send email'}</span><Send size={14} /></button>
+      <button type="submit" form="email-form" disabled={busy || isSaving || !canSend || !accountId || loadedDraft?.can_edit === false}><span>{preparingReview ? 'Preparing...' : 'Send email'}</span><Send size={14} /></button>
     </div></div>
     <dialog ref={reviewDialog} aria-labelledby="send-review-title" className="compose-review" onClose={() => setReview(null)}>
       <h2 id="send-review-title">Review before sending</h2>

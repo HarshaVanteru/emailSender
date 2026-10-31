@@ -27,6 +27,7 @@ const assert = require('node:assert/strict');
         cc_addresses: [{ name: 'Bob', email: 'bob@example.com' }], body_text: 'Hello', body_html: null,
         attachments: [{ id: 1, filename: 'original.pdf', mime_type: 'application/pdf', size_bytes: 100 }] };
       await page.route('**/api/v1/**', async route => {
+        if (route.request().method() === 'GET' && /\/accounts\/\d+\/send-jobs$/.test(new URL(route.request().url()).pathname)) return route.fulfill({ json: [] });
         const url = new URL(route.request().url()), path = url.pathname, method = route.request().method();
         const headers = { 'access-control-allow-origin': '*' };
         if (method === 'OPTIONS') return route.fulfill({ status: 204, headers: { ...headers,
@@ -49,7 +50,7 @@ const assert = require('node:assert/strict');
           body = { mode, context_hash: contextHash, to: mode === 'forward' ? [] : ['alex@example.com'],
             cc: mode === 'reply_all' ? ['bob@example.com'] : [], subject: mode === 'forward' ? 'Fwd: Project update' : 'Re: Project update',
             body: mode === 'forward' ? '---------- Forwarded message ----------\nHello' : '', original_attachments: 1 };
-        } else if (path.endsWith('/messages/1/send')) {
+        } else if (path.endsWith('/messages/1/send-jobs')) {
           sends++;
           const payload = route.request().postDataJSON();
           assert.equal(payload.context_hash, contextHash);
@@ -57,7 +58,7 @@ const assert = require('node:assert/strict');
             assert.deepEqual(payload.to, ['alex@example.com']);
             assert.deepEqual(payload.cc, ['bob@example.com']);
           } else assert.deepEqual(payload.to, ['new@example.com']);
-          body = { message_id: `sent${sends}`, threaded: payload.mode !== 'forward' };
+          body = { id: 'send-job-' + sends, status: 'sent', result: { message_id: `sent${sends}`, threaded: payload.mode !== 'forward' } };
         } else if (path.endsWith('/accounts/1/sync')) body = { id: 4, status: 'queued', error_code: null };
         else if (path.endsWith('/sync-jobs/4')) body = { id: 4, status: 'succeeded', error_code: null };
         else throw new Error(`Unexpected API request: ${method} ${path}`);

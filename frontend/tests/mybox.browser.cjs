@@ -15,6 +15,7 @@ const assert = require('node:assert/strict');
       const spam = { ...base, id: 6, subject: 'Spam message', ai_is_spam: true };
       await page.routeWebSocket('**/api/v1/accounts/1/events', ws => { socket = ws; ws.onMessage(() => ws.send(JSON.stringify({ type: 'ready', account_id: 1 }))); });
       await page.route('**/api/v1/**', async route => {
+        if (route.request().method() === 'GET' && /\/accounts\/\d+\/send-jobs$/.test(new URL(route.request().url()).pathname)) return route.fulfill({ json: [] });
         const url = new URL(route.request().url()); const path = url.pathname;
         let json;
         if (path.endsWith('/gmail/profile')) json = { email: 'owner@example.com', is_connected: true };

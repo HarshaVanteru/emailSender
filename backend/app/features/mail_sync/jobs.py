@@ -3,11 +3,14 @@ import json
 import logging
 import random
 import secrets
-from datetime import timedelta
+import time
+from app.core.observability import log_operation
+from datetime import timedelta, datetime, timezone
+from email.utils import parsedate_to_datetime
 
 from billiard.exceptions import SoftTimeLimitExceeded
 from fastapi import HTTPException
-from google.auth.exceptions import TransportError
+from google.auth.exceptions import TransportError, RefreshError
 from googleapiclient.errors import HttpError
 from redis.exceptions import RedisError
 from requests.exceptions import RequestException
@@ -161,6 +164,8 @@ def claim_job(db, job_id):
 
 
 def classify_failure(exc):
+    if isinstance(exc, RefreshError):
+        return ('gmail_refresh_unavailable', True) if exc.retryable else ('gmail_http_401', False)
     if isinstance(exc, SoftTimeLimitExceeded):
         return "worker_time_limit", True
     if isinstance(exc, RedisError):
@@ -188,12 +193,25 @@ def classify_failure(exc):
     return "sync_failed", False
 
 
-def finish_attempt(db, account, job, code, retryable):
+def retry_after_seconds(exc):
+    if not isinstance(exc, HttpError):
+        return 0
+    value = exc.resp.get("retry-after")
+    try:
+        return max(0, min(86400, int(value)))
+    except (ValueError, TypeError):
+        try:
+            return max(0, min(86400, int((parsedate_to_datetime(value) - datetime.now(timezone.utc)).total_seconds())))
+        except (ValueError, TypeError, OverflowError):
+            return 0
+
+
+def finish_attempt(db, account, job, code, retryable, retry_after=0):
     now = utcnow()
     job.error_code = code
     job.lease_token = job.lease_expires_at = None
     if retryable and job.attempts < config.SYNC_MAX_ATTEMPTS:
-        delay = random.uniform(0.5, 1.0) * min(300, 15 * 2 ** max(0, job.attempts - 1))
+        delay = max(retry_after, random.uniform(0.5, 1.0) * min(300, 15 * 2 ** max(0, job.attempts - 1)))
         job.status, job.finished_at = "queued", None
         job.available_at = now + timedelta(seconds=delay)
         job.dispatch_after = job.available_at
@@ -202,7 +220,7 @@ def finish_attempt(db, account, job, code, retryable):
         # Exhausted transient failures get a fresh job after a cooldown. Only
         # permanent failures need intervention; users have no manual sync step.
         account.sync_paused = not retryable
-        if code in ("gmail_http_401", "gmail_http_403"):
+        if code == "gmail_http_401":
             account.requires_reauth = True
         if retryable:
             account.next_sync_at = now + timedelta(seconds=max(300, config.SYNC_INTERVAL_SECONDS))
@@ -210,7 +228,7 @@ def finish_attempt(db, account, job, code, retryable):
                     resource_type="sync_job", resource_id=str(job.id), outcome="retry" if job.status == "queued" else "failure"))
 
 
-def record_failure(db, job_id, token, code, retryable):
+def record_failure(db, job_id, token, code, retryable, retry_after=0):
     snapshot = db.get(SyncJob, job_id)
     if snapshot is None:
         return
@@ -220,12 +238,13 @@ def record_failure(db, job_id, token, code, retryable):
     if job.status != "running" or job.lease_token != token:
         db.rollback()
         return
-    finish_attempt(db, account, job, code, retryable)
+    finish_attempt(db, account, job, code, retryable, retry_after)
     db.commit()
     publish_update(account.id)
 
 
 def process_job(job_id, session_factory=SessionLocal, service_factory=None, limiter=None):
+    started = time.monotonic()
     with session_factory() as db:
         try:
             claim = claim_job(db, job_id)
@@ -253,7 +272,9 @@ def process_job(job_id, session_factory=SessionLocal, service_factory=None, limi
             # The job and account locks remain held through the cache commit.
             # Recovery uses SKIP LOCKED and cannot reclaim a live transaction.
             with request_guard(lambda: gate.wait(account_id)):
-                job.kind = apply_sync(db, account, service, reconcile=job.kind == "reconcile")
+                progress = {'seen': 0, 'inserted': 0, 'updated': 0}
+                job.kind = apply_sync(db, account, service, reconcile=job.kind == "reconcile", progress=progress)
+                job.messages_seen, job.messages_inserted, job.messages_updated = progress['seen'], progress['inserted'], progress['updated']
             now = utcnow()
             job.status, job.finished_at, job.error_code = "succeeded", now, None
             job.active_account_id = job.lease_token = job.lease_expires_at = None
@@ -263,9 +284,16 @@ def process_job(job_id, session_factory=SessionLocal, service_factory=None, limi
             if account.mail_import_complete and job.kind in ("initial", "reconcile"):
                 account.next_reconcile_at = now + timedelta(seconds=config.SYNC_RECONCILE_SECONDS)
             account.sync_paused = False
+            from app.features.google_login.accounts import persist_provider_refresh
+            persist_provider_refresh(account, service)
+            from app.features.mail_sync.push_models import PushEvent
+            for event in db.query(PushEvent).filter_by(account_id=account_id, status="pending"):
+                if account.history_id and int(event.history_id) <= int(account.history_id):
+                    event.status, event.processed_at = "processed", now
             db.add(AuditLog(user_id=user_id, account_id=account_id, action="mailbox.sync",
                             resource_type="sync_job", resource_id=str(job_id), outcome="success"))
             db.commit()
+            log_operation('mailbox.sync', user_id, account_id, job_id, 'succeeded', started)
             publish_update(account_id)
             if not account.mail_import_complete:
                 # Commit each page before dispatching the next. A queue outage
@@ -275,7 +303,8 @@ def process_job(job_id, session_factory=SessionLocal, service_factory=None, limi
         except Exception as exc:
             db.rollback()
             code, retryable = classify_failure(exc)
-            record_failure(db, job_id, token, code, retryable)
+            record_failure(db, job_id, token, code, retryable, retry_after_seconds(exc))
+            log_operation('mailbox.sync', user_id, account_id, job_id, 'retry' if retryable else 'failed', started, code)
 
 
 def recover_expired(db):

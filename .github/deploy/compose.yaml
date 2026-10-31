@@ -6,6 +6,7 @@ x-backend: &backend
     REDIS_URL: redis://redis:6379/0
     DATABASE_HOST_OVERRIDE: ${DATABASE_HOST_OVERRIDE:-}
     PORT: ${PORT:-8000}
+    RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
   extra_hosts:
     - "host.docker.internal:host-gateway"
   depends_on:
@@ -33,16 +34,16 @@ services:
 
   worker:
     <<: *backend
-    command: ["celery", "-A", "app.workers.celery_app:celery_app", "worker", "--hostname=mailbox@%h", "-Q", "gmail-sync,gmail-maintenance,gmail-ai", "--concurrency=2", "--loglevel=INFO"]
+    command: ["python", "-m", "app.workers.supervisor"]
     stop_grace_period: 31m
     healthcheck:
       test:
         - CMD
         - python
-        - -c
-        - "import socket; from app.workers.celery_app import celery_app; node = 'mailbox@' + socket.gethostname(); result = celery_app.control.inspect(destination=[node], timeout=3).ping() or {}; raise SystemExit(0 if result.get(node, {}).get('ok') == 'pong' else 1)"
+        - -m
+        - app.workers.health
       interval: 30s
-      timeout: 6s
+      timeout: 8s
       start_period: 20s
       retries: 5
 

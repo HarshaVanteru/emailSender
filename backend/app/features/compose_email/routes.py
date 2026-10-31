@@ -7,6 +7,7 @@ from app.features.google_login.user import User
 from app.features.google_login import accounts as account_service
 from app.features.compose_email.schemas import SendEmailRequest
 from app.integrations.gmail.client import gmail_service
+from app.features.compose_email.inline_receipt import tracked_send
 
 router = APIRouter(prefix="/gmail", tags=["compose"])
 
@@ -22,7 +23,8 @@ def send_gmail_email(request: SendEmailRequest, current_user: User = Depends(get
                 "content_type": request.attachment.content_type,
                 "data": request.attachment.data
             }
-        result = gmail_service.send_email(
+        account_id = request.account_id or account_service.find_account(db, current_user).id
+        result = tracked_send(db, current_user.id, account_id, request.model_dump(), lambda: gmail_service.send_email(
             to=request.to,
             subject=request.subject,
             body=request.body,
@@ -30,7 +32,7 @@ def send_gmail_email(request: SendEmailRequest, current_user: User = Depends(get
             google_token=credentials.to_json(),
             cc=request.cc, bcc=request.bcc, body_html=request.body_html,
             attachments=[item.model_dump() for item in request.attachments],
-        )
+        ))
         return {"status": "success", "message_id": result["id"]}
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None

@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
+import secrets
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
@@ -9,6 +10,8 @@ from app.core import config
 from app.core.config import ACCESS_TOKEN_EXPIRE_MINUTES, ALGORITHM
 from app.core.database import get_db
 from app.features.google_login.user import User
+from app.features.google_login.models import UserSession
+from app.core.time import utcnow
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/token", auto_error=False)
 
@@ -29,7 +32,7 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None):
     encoded_jwt = jwt.encode(to_encode, signing_key(), algorithm=ALGORITHM)
     return encoded_jwt
 
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db), request: Request = None):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -51,4 +54,20 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     user = db.query(User).filter(User.email == email).first()
     if user is None:
         raise credentials_exception
+    if not payload.get("sid") and not config.ALLOW_LEGACY_SESSIONS:
+        raise credentials_exception
+    if payload.get("sid"):
+        session = db.get(UserSession, payload["sid"])
+        if not session or session.user_id != user.id or session.revoked_at or session.expires_at <= utcnow():
+            raise credentials_exception
+    if request is not None:
+        request.state.user_id = user.id
     return user
+
+
+def create_session(db, user):
+    session = UserSession(id=secrets.token_hex(32), user_id=user.id,
+                          expires_at=utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    db.add(session)
+    db.commit()
+    return session

@@ -8,6 +8,7 @@ import type { GmailProfile } from '../features/profile/types';
 import { fetchGmailProfile } from '../features/profile/api';
 import { generateEmailDraft } from '../features/ai-assistant/api';
 import { getGmailAuthUrl } from '../features/google-login/api';
+import { ConnectAccount } from '../features/google-login/ConnectAccount';
 import { setToken } from '../features/google-login/session';
 import { ThreadChatHistoryProvider } from '../features/ai-assistant/ThreadChatHistory';
 import { FloatingChat } from '../features/ai-assistant/FloatingChat';
@@ -32,6 +33,8 @@ export const App: React.FC = () => {
     const fragment = new URLSearchParams(window.location.hash.slice(1));
     return {
       status: fragment.get('auth'),
+      connection: fragment.get('connection') === 'account',
+      accountId: /^\d+$/.test(fragment.get('account_id') || '') ? Number(fragment.get('account_id')) : undefined,
       reconnectUrl: getGmailAuthUrl(true, fragment.get('mailbox_access') === 'true',
         fragment.get('modify_access') === 'true', fragment.get('draft_access') === 'true'),
     };
@@ -173,8 +176,9 @@ export const App: React.FC = () => {
 
       {authNotice && <div role="status" className="px-5 py-2 text-sm text-amber-700 dark:text-amber-300">
         <p>{authNotice}</p>
-        {authResult.status === 'offline_access_required' && <a href={authResult.reconnectUrl}
-          className="inline-block mt-2 font-medium underline underline-offset-2">Reconnect Gmail</a>}
+        {authResult.status === 'offline_access_required' && (authResult.connection && profile?.email
+          ? <ConnectAccount accountId={authResult.accountId}>Reconnect Gmail</ConnectAccount>
+          : <a href={authResult.reconnectUrl} className="inline-block mt-2 font-medium underline underline-offset-2">Reconnect Gmail</a>)}
       </div>}
 
       {showSettings && (

@@ -10,6 +10,7 @@ from app.core.config import GMAIL_MODIFY_SCOPE
 from app.features.mailbox.models import AuditLog, EmailLabel, EmailMessage, MessageLabel
 from app.features.google_login.accounts import credentials_for_account
 from app.integrations.gmail.client import gmail_service
+from app.integrations.gmail.adapter import GmailAdapter
 from app.features.mail_sync.service import SYSTEM_LABELS, owned_account, utcnow
 from app.features.mailbox.reader import serialize_messages
 from app.workers.rate_limit import GmailRateLimiter
@@ -70,7 +71,7 @@ def change_message(db, user_id, account_id, message_id, *, read=None, starred=No
         gate = limiter if limiter is not None else GmailRateLimiter()
         gate.wait(account_id)
         if action == "trash":
-            response = service.users().messages().trash(userId="me", id=message.gmail_message_id).execute(num_retries=0)
+            response = GmailAdapter(service).trash_message(message.gmail_message_id).execute(num_retries=0)
         else:
             add, remove = [], []
             if read is not None:
@@ -79,9 +80,7 @@ def change_message(db, user_id, account_id, message_id, *, read=None, starred=No
                 (add if starred else remove).append("STARRED")
             if action == "archive":
                 remove.append("INBOX")
-            response = service.users().messages().modify(
-                userId="me", id=message.gmail_message_id,
-                body={"addLabelIds": add, "removeLabelIds": remove}).execute(num_retries=0)
+            response = GmailAdapter(service).modify_message(message.gmail_message_id, add, remove).execute(num_retries=0)
         apply_labels(db, account_id, message, response)
         if response.get("historyId") is not None:
             message.gmail_history_id = str(response["historyId"])

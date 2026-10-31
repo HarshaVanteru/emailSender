@@ -19,6 +19,7 @@ from app.features.compose_email.thread_service import addresses, header, unique_
 MAX_MESSAGES = 8
 MAX_CONTEXT_CHARS = 12_000
 MAX_MESSAGE_CHARS = 2_000
+PROMPT_VERSION = 'context-v1'
 TASKS = {
     'summarize': 'Answer the user instruction or question about the conversation in summary and up to eight key_points. If no question is provided, summarize the conversation factually. Explain terms in plain language when asked. Do not invent facts.',
     'generate_reply': 'Suggest a concise, natural reply in draft.body. Do not claim any action was taken.',
@@ -109,7 +110,14 @@ def generate(db, user_id, account_id, thread_id, operation, request, model=None)
     account, thread, target, records = load_context(db, user_id, account_id, thread_id, request.message_id)
     source = {'conversation': records, 'user_instruction': request.instruction,
               'selected_text': request.text if operation == 'rewrite' else ''}
-    input_hash = hashlib.sha256(json.dumps(source, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    from app.core.config import AI_MODEL
+    input_hash = hashlib.sha256(json.dumps({'source': source, 'prompt_version': PROMPT_VERSION,
+        'model': AI_MODEL}, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    existing = db.query(AiSuggestion).filter_by(user_id=user_id, account_id=account_id,
+        thread_id=thread_id, operation=operation, input_hash=input_hash).first()
+    if existing:
+        return {'id': existing.id, 'message_id': existing.message_id, 'operation': operation,
+                'result': existing.result, 'created_at': existing.created_at.isoformat()}
     messages = [SystemMessage(content=f'{SYSTEM}\n\nTASK: {TASKS[operation]}'),
                 HumanMessage(content=json.dumps(source, ensure_ascii=False))]
     try:

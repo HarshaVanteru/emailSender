@@ -15,6 +15,7 @@ fs.mkdirSync(process.env.SCREENSHOT_DIR || 'artifacts', { recursive: true });
       let failRevocation = true;
       let sends = 0;
       await page.route('**/api/v1/**', async (route) => {
+        if (route.request().method() === 'GET' && /\/accounts\/\d+\/send-jobs$/.test(new URL(route.request().url()).pathname)) return route.fulfill({ json: [] });
         const path = new URL(route.request().url()).pathname;
         const headers = { 'access-control-allow-origin': '*' };
         let status = 200;
@@ -45,7 +46,7 @@ fs.mkdirSync(process.env.SCREENSHOT_DIR || 'artifacts', { recursive: true });
       await page.goto((process.env.APP_URL || 'http://127.0.0.1:4174') + '/#token=test-session&auth=success');
       await page.getByRole('button', { name: 'Open profile settings' }).waitFor();
       assert.equal(await page.evaluate(() => location.hash), '');
-      assert.equal(await page.evaluate(() => localStorage.getItem('access_token')), 'test-session');
+      assert.equal(await page.evaluate(() => sessionStorage.getItem('access_token')), 'test-session');
       await page.getByRole('navigation', { name: 'Workspace', exact: true }).getByRole('button', { name: 'Write', exact: true }).click();
       assert.equal(await page.getByRole('button', { name: 'Send email', exact: true }).isEnabled(), true);
       await page.getByRole('button', { name: 'Open profile settings' }).click();
@@ -58,9 +59,9 @@ fs.mkdirSync(process.env.SCREENSHOT_DIR || 'artifacts', { recursive: true });
       assert.equal(connected, true);
       failRevocation = false;
       await page.getByRole('button', { name: 'Confirm disconnect' }).click();
-      await page.getByRole('link', { name: 'Reconnect Gmail', exact: true }).waitFor();
+      await page.getByRole('button', { name: 'Reconnect Gmail', exact: true }).waitFor();
       assert.equal(deletes, 2);
-      assert.match(await page.getByRole('link', { name: 'Reconnect Gmail', exact: true }).getAttribute('href'), /renew_consent=true/);
+      assert.equal(await page.getByRole('button', { name: 'Reconnect Gmail', exact: true }).isEnabled(), true);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
       await page.screenshot({ path: `${process.env.SCREENSHOT_DIR || 'artifacts'}/gmail-connection-${width}.png` });
       await page.getByRole('button', { name: 'Close settings' }).click();
@@ -81,7 +82,7 @@ fs.mkdirSync(process.env.SCREENSHOT_DIR || 'artifacts', { recursive: true });
           assert.equal(retryUrl.searchParams.get(option), option === flag ? 'true' : null);
         }
         assert.equal(await page.evaluate(() => location.hash), '');
-        assert.equal(await page.evaluate(() => localStorage.getItem('access_token')), 'test-session');
+        assert.equal(await page.evaluate(() => sessionStorage.getItem('access_token')), 'test-session');
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
       }
       await page.close();

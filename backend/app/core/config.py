@@ -13,6 +13,7 @@ GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
 GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+AI_MODEL = os.getenv("AI_MODEL", "openai/gpt-oss-120b")
 
 DATABASE_URL = resolve_database_url(os.getenv(
     "DATABASE_URL", "mysql+pymysql://root:password@host.docker.internal:3306/email_sender"
@@ -22,6 +23,9 @@ SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24
 TOKEN_ENCRYPTION_KEY = os.getenv("TOKEN_ENCRYPTION_KEY")
+TOKEN_ENCRYPTION_KEY_VERSION = os.getenv("TOKEN_ENCRYPTION_KEY_VERSION", "v1")
+TOKEN_ENCRYPTION_PREVIOUS_KEYS = os.getenv("TOKEN_ENCRYPTION_PREVIOUS_KEYS", "")
+INITIAL_SYNC_DAYS = max(1, min(365, int(os.getenv("INITIAL_SYNC_DAYS", "30"))))
 OAUTH_STATE_TTL_SECONDS = 600
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 GMAIL_PUSH_TOPIC = os.getenv("GMAIL_PUSH_TOPIC", "")
@@ -34,6 +38,10 @@ SYNC_RECONCILE_SECONDS = max(300, int(os.getenv("SYNC_RECONCILE_SECONDS", "86400
 SYNC_TASK_TIME_LIMIT = max(60, int(os.getenv("SYNC_TASK_TIME_LIMIT", "1800")))
 SYNC_LEASE_SECONDS = SYNC_TASK_TIME_LIMIT + 60
 SYNC_REQUESTS_PER_SECOND = max(1, min(20, int(os.getenv("SYNC_REQUESTS_PER_SECOND", "10"))))
+GMAIL_GLOBAL_REQUESTS_PER_SECOND = max(1, int(os.getenv("GMAIL_GLOBAL_REQUESTS_PER_SECOND", "100")))
+RATE_LIMIT_ENABLED = os.getenv("RATE_LIMIT_ENABLED", "false").lower() == "true"
+API_REQUESTS_PER_MINUTE = max(1, int(os.getenv("API_REQUESTS_PER_MINUTE", "60")))
+ALLOW_LEGACY_SESSIONS = os.getenv("ALLOW_LEGACY_SESSIONS", "false").lower() == "true"
 GMAIL_READ_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 GMAIL_MODIFY_SCOPE = "https://www.googleapis.com/auth/gmail.modify"
 GMAIL_COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compose"

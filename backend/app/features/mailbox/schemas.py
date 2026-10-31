@@ -1,4 +1,5 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from typing import Literal
 
 
 class Recipient(BaseModel):
@@ -37,9 +38,17 @@ class MailDetail(MailSummary):
     attachments: list[AttachmentMetadata]
 
 
+class HistoricalStatus(BaseModel):
+    status: Literal['idle', 'pending', 'ready', 'completed', 'failed', 'expired'] = 'idle'
+    session_id: str | None = None
+
+
 class MailPage(BaseModel):
     items: list[MailSummary]
     next_page_token: str | None
+    next_cursor: str | None = None
+    has_more_local: bool = False
+    historical_sync: HistoricalStatus = Field(default_factory=HistoricalStatus)
 
 
 class ThreadPage(BaseModel):

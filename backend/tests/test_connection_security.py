@@ -357,7 +357,7 @@ class ConnectionMigrationTests(unittest.TestCase):
             token = credentials().to_json()
             connection.execute(text("INSERT INTO users (id,email,google_token) VALUES (1,'owner@example.com',:token)"), {"token": token})
             command.upgrade(config, "head")
-            encrypted = connection.execute(text("SELECT encrypted_credentials FROM connected_accounts")).scalar_one()
+            encrypted = connection.execute(text("SELECT encrypted_payload FROM oauth_credentials")).scalar_one()
             self.assertEqual(decrypt(encrypted), token)
             self.assertIsNone(connection.execute(text("SELECT google_token FROM users")).scalar_one())
             command.downgrade(config, "0001")

@@ -149,15 +149,8 @@ if (( ${#retired[@]} )); then docker rm "${retired[@]}"; fi
 # Health checks cover API, Redis, and worker responsiveness. Also verify every
 # queue so mail updates or AI review cannot silently remain unconsumed.
 "${compose[@]}" exec -T worker python - <<'PY'
-import socket
-from app.workers.celery_app import celery_app
-node = "mailbox@" + socket.gethostname()
-queues = celery_app.control.inspect(destination=[node], timeout=5).active_queues() or {}
-actual = {queue["name"] for queue in queues.get(node, [])}
-expected = {"gmail-sync", "gmail-maintenance", "gmail-ai"}
-if actual != expected:
-    raise SystemExit("Worker queue mismatch: " + repr(actual))
-print("Worker is consuming all three mailbox queues.")
+from app.workers.health import check
+check()
 PY
 for service in emailsender worker scheduler; do
   container=$("${compose[@]}" ps --quiet "$service")

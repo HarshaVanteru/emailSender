@@ -97,12 +97,19 @@ class ApiVersioningTests(unittest.TestCase):
         suggestion = CopilotResponse(draft=GeneratedEmail(
             to="recipient@example.com", subject="Test", body="Hello",
         ))
-        with patch.object(ai_service, "generate_email", return_value=suggestion):
+        with patch.object(ai_service, "generate_email", return_value=suggestion) as model:
             with patch.object(gmail_service, "send_email") as send:
                 for prefix in ("/api", "/api/v1"):
                     response = self.client.post(prefix + "/ai/generate-email", json={"instruction": "Draft a greeting"})
-                    self.assertEqual(response.status_code, 200)
-                    self.assertEqual(response.json()["draft"]["body"], "Hello")
+                    self.assertEqual(response.status_code, 202)
+                    job_id = response.json()['id']
+                    self.assertEqual(response.json()['status'], 'pending')
+                model.assert_not_called()
+                from sqlalchemy.orm import sessionmaker
+                from app.workers.operations import process
+                process('ai', job_id, sessionmaker(self.engine))
+                status = self.client.get('/api/v1/ai/jobs/' + job_id)
+                self.assertEqual(status.json()['result']['draft']['body'], 'Hello')
                 send.assert_not_called()
 
     def test_oauth_aliases_share_state_and_reject_invalid_callbacks(self):

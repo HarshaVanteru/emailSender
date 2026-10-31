@@ -10,6 +10,10 @@ from sqlalchemy import (
 from sqlalchemy.dialects.mysql import LONGTEXT
 
 from app.core.database import Base
+from app.core.sql_types import ID_TYPE
+from app.features.mail_sync.history_models import HistorySession
+from app.features.mail_sync.push_models import PushEvent
+from app.workers.operation_models import SendJob, AiJob
 
 LARGE_TEXT = Text().with_variant(LONGTEXT(), "mysql")
 # Binary collation preserves case-sensitive provider IDs on MySQL.
@@ -24,8 +28,8 @@ class EmailThread(Base):
         Index("ix_threads_account_date", "account_id", "last_message_at"),
         MYSQL_OPTIONS,
     )
-    id = Column(Integer, primary_key=True)
-    account_id = Column(Integer, ForeignKey("connected_accounts.id"), nullable=False)
+    id = Column(ID_TYPE, primary_key=True)
+    account_id = Column(ID_TYPE, ForeignKey("connected_accounts.id"), nullable=False)
     gmail_thread_id = Column(String(128), nullable=False)
     subject = Column(Text)
     snippet = Column(Text)
@@ -44,9 +48,9 @@ class EmailMessage(Base):
         CheckConstraint("size_estimate >= 0", name="ck_messages_size"),
         MYSQL_OPTIONS,
     )
-    id = Column(Integer, primary_key=True)
-    account_id = Column(Integer, ForeignKey("connected_accounts.id"), nullable=False)
-    thread_id = Column(Integer, nullable=False)
+    id = Column(ID_TYPE, primary_key=True)
+    account_id = Column(ID_TYPE, ForeignKey("connected_accounts.id"), nullable=False)
+    thread_id = Column(ID_TYPE, nullable=False)
     gmail_message_id = Column(String(128), nullable=False)
     gmail_history_id = Column(String(255))
     from_address = Column(Text)
@@ -72,8 +76,8 @@ class EmailLabel(Base):
         CheckConstraint("type IN ('system', 'user')", name="ck_labels_type"),
         MYSQL_OPTIONS,
     )
-    id = Column(Integer, primary_key=True)
-    account_id = Column(Integer, ForeignKey("connected_accounts.id"), nullable=False)
+    id = Column(ID_TYPE, primary_key=True)
+    account_id = Column(ID_TYPE, ForeignKey("connected_accounts.id"), nullable=False)
     gmail_label_id = Column(String(128), nullable=False)
     name = Column(Text, nullable=False)
     type = Column(String(16), nullable=False)
@@ -89,9 +93,9 @@ class MessageLabel(Base):
         Index("ix_message_labels_account_label", "account_id", "label_id", "message_id"),
         MYSQL_OPTIONS,
     )
-    account_id = Column(Integer, primary_key=True)
-    message_id = Column(Integer, primary_key=True)
-    label_id = Column(Integer, primary_key=True)
+    account_id = Column(ID_TYPE, primary_key=True)
+    message_id = Column(ID_TYPE, primary_key=True)
+    label_id = Column(ID_TYPE, primary_key=True)
 
 
 class EmailAttachment(Base):
@@ -103,9 +107,9 @@ class EmailAttachment(Base):
         CheckConstraint("size_bytes >= 0", name="ck_attachments_size"),
         MYSQL_OPTIONS,
     )
-    id = Column(Integer, primary_key=True)
-    account_id = Column(Integer, nullable=False)
-    message_id = Column(Integer, nullable=False)
+    id = Column(ID_TYPE, primary_key=True)
+    account_id = Column(ID_TYPE, nullable=False)
+    message_id = Column(ID_TYPE, nullable=False)
     mime_part_id = Column(String(128), nullable=False)
     gmail_attachment_id = Column(Text)  # Some MIME parts have inline data instead.
     filename = Column(Text, nullable=False)
@@ -127,16 +131,19 @@ class SyncJob(Base):
         Index("ix_sync_jobs_lease", "status", "lease_expires_at"),
         MYSQL_OPTIONS,
     )
-    id = Column(Integer, primary_key=True)
-    account_id = Column(Integer, ForeignKey("connected_accounts.id"), nullable=False)
+    id = Column(ID_TYPE, primary_key=True)
+    account_id = Column(ID_TYPE, ForeignKey("connected_accounts.id"), nullable=False)
     kind = Column(String(16), nullable=False)
     status = Column(String(16), nullable=False, default="queued", server_default="queued")
     attempts = Column(Integer, nullable=False, default=0, server_default="0")
+    messages_seen = Column(Integer, nullable=False, default=0, server_default="0")
+    messages_inserted = Column(Integer, nullable=False, default=0, server_default="0")
+    messages_updated = Column(Integer, nullable=False, default=0, server_default="0")
     created_at = Column(DateTime, nullable=False, server_default=func.current_timestamp())
     started_at = Column(DateTime)
     finished_at = Column(DateTime)
     error_code = Column(String(128))  # Sanitized code, not provider response/secrets.
-    active_account_id = Column(Integer)
+    active_account_id = Column(ID_TYPE)
     available_at = Column(DateTime, nullable=False, server_default=func.current_timestamp())
     dispatch_after = Column(DateTime)
     lease_token = Column(String(64))
@@ -152,9 +159,9 @@ class AuditLog(Base):
         Index("ix_audit_logs_account_date", "account_id", "created_at"),
         MYSQL_OPTIONS,
     )
-    id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    account_id = Column(Integer)
+    id = Column(ID_TYPE, primary_key=True)
+    user_id = Column(ID_TYPE, ForeignKey("users.id"), nullable=False)
+    account_id = Column(ID_TYPE)
     action = Column(String(64), nullable=False)
     resource_type = Column(String(64))
     resource_id = Column(String(255))
@@ -172,11 +179,11 @@ class AiSuggestion(Base):
         Index("ix_ai_suggestions_owner_thread_date", "user_id", "account_id", "thread_id", "created_at"),
         MYSQL_OPTIONS,
     )
-    id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, nullable=False)
-    account_id = Column(Integer, nullable=False)
-    thread_id = Column(Integer, nullable=False)
-    message_id = Column(Integer)
+    id = Column(ID_TYPE, primary_key=True)
+    user_id = Column(ID_TYPE, nullable=False)
+    account_id = Column(ID_TYPE, nullable=False)
+    thread_id = Column(ID_TYPE, nullable=False)
+    message_id = Column(ID_TYPE)
     operation = Column(String(24), nullable=False)
     input_hash = Column(String(64), nullable=False)
     result = Column(JSON, nullable=False)
@@ -192,8 +199,8 @@ class MessageTriage(Base):
         Index("ix_triage_account_state", "account_id", "state"),
         MYSQL_OPTIONS,
     )
-    message_id = Column(Integer, primary_key=True)
-    account_id = Column(Integer, nullable=False)
+    message_id = Column(ID_TYPE, primary_key=True)
+    account_id = Column(ID_TYPE, nullable=False)
     state = Column(String(16), nullable=False)
     is_spam = Column(Integer)
     importance = Column(String(16))

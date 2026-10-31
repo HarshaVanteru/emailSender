@@ -42,3 +42,14 @@ Serve the production build on port 4174, or set `APP_URL` to a local server.
 Set `PLAYWRIGHT_MODULE` if Playwright is installed outside this project.
 Most browser checks mock provider requests; `live-readonly.browser.cjs`
 is a separate live-account diagnostic.
+That diagnostic requires an operator-provided `LIVE_READONLY_TOKEN` from an
+existing signed-in test session; it no longer mints a token for the first database
+user. Screenshots containing live mailbox data require the explicit
+`LIVE_READONLY_SCREENSHOTS=true` opt-in. It was not run during isolated verification.
+
+`spec-workflows.browser.cjs` checks explicit historical fetches, Gmail labels,
+attachment downloads, uncertain-send reconciliation and authenticated add-account.
+AI generation and current sending flows use durable job status APIs; review and
+the browser undo countdown still happen before a send is submitted. See the
+[implementation handoff](../docs/implementation-status.md) for migration and
+backend/frontend rollout compatibility requirements.

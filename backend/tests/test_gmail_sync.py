@@ -134,14 +134,14 @@ class GmailSyncTests(unittest.TestCase):
     def sync(self, **kwargs):
         return gmail_sync.synchronize(self.db, self.user.id, self.account.id, service=self.service, **kwargs)
 
-    def test_initial_import_paginates_and_keeps_pre_scan_cursor(self):
+    def test_recent_import_paginates_and_commits_incremental_baseline(self):
         self.service.message_pages = {None: {"messages": [{"id": "m1"}], "nextPageToken": "next"},
                                       "next": {"messages": [{"id": "m2"}]}}
         self.service.messages_by_id["m2"] = message("m2", thread="t2")
         self.service.messages_by_id["m2"]["historyId"] = "120"
         result = self.sync()
         self.assertEqual((result["status"], result["kind"]), ("succeeded", "initial"))
-        self.assertIsNone(self.account.history_id)
+        self.assertEqual(self.account.history_id, "100")
         self.assertFalse(self.account.mail_import_complete)
         self.assertEqual(self.account.mail_import_page_token, "next")
         self.assertEqual(self.db.query(EmailMessage).count(), 1)
@@ -155,7 +155,8 @@ class GmailSyncTests(unittest.TestCase):
         self.assertFalse(any(call[0] == "attachments.get" for call in self.service.calls))
         listing = [kwargs for operation, kwargs in self.service.calls if operation == "messages.list"]
         self.assertEqual(listing[1]["pageToken"], "next")
-        self.assertNotIn("q", listing[0])
+        self.assertRegex(listing[0]["q"], r"^after:\d+$")
+        self.assertEqual(listing[0]["q"], listing[1]["q"])
         self.assertTrue(listing[0]["includeSpamTrash"])
 
     def test_initial_sync_replay_preserves_message_and_attachment_ids(self):
@@ -172,7 +173,7 @@ class GmailSyncTests(unittest.TestCase):
         with self.assertRaises(HTTPException):
             self.sync()
         self.assertEqual(self.account.mail_import_page_token, "older")
-        self.assertIsNone(self.account.history_id)
+        self.assertEqual(self.account.history_id, "100")
         self.assertEqual(self.db.query(EmailMessage).count(), 1)
         self.service.message_pages["older"] = {"messages": [{"id": "old"}]}
         self.service.messages_by_id["old"] = message("old", thread="ancient", date="946684800000")
@@ -188,7 +189,7 @@ class GmailSyncTests(unittest.TestCase):
         with self.assertRaises(HTTPException):
             self.sync()
         self.assertEqual(self.account.mail_import_page_token, "loop")
-        self.assertIsNone(self.account.history_id)
+        self.assertEqual(self.account.history_id, "100")
 
     def test_expired_import_token_restarts_listing_without_dropping_cached_mail(self):
         self.service.message_pages = {None: {"messages": [{"id": "m1"}], "nextPageToken": "expired"}}

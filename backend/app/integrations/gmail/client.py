@@ -1,5 +1,6 @@
 import base64
 import json
+from contextvars import ContextVar
 from email.message import EmailMessage
 from mimetypes import guess_type
 
@@ -10,6 +11,8 @@ from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from google_auth_httplib2 import AuthorizedHttp
 import httplib2
+
+send_correlation = ContextVar('send_correlation', default=None)
 
 from app.core.config import (
     GMAIL_SCOPES,
@@ -62,12 +65,13 @@ class GmailService:
         # is sufficient for profile verification before the stored token is merged.
         data.setdefault("refresh_token", None)
         credentials = Credentials.from_authorized_user_info(data)
-        return build("gmail", "v1", http=AuthorizedHttp(credentials, http=httplib2.Http(timeout=30)))
+        return build("gmail", "v1", http=AuthorizedHttp(credentials, http=httplib2.Http(timeout=30), max_refresh_attempts=1))
 
     def build_raw(self, to: str | None, subject: str, body: str, attachment: dict | None = None,
                   draft: bool = False, cc: str | None = None, in_reply_to: str | None = None,
                   references: str | None = None, bcc: str | None = None,
-                  body_html: str | None = None, attachments: list[dict] | None = None) -> str:
+                  body_html: str | None = None, attachments: list[dict] | None = None,
+                  message_id: str | None = None) -> str:
         message = EmailMessage()
         if to:
             message["To"] = to
@@ -76,6 +80,9 @@ class GmailService:
         if bcc:
             message["Bcc"] = bcc
         message["Subject"] = subject
+        message_id = message_id or send_correlation.get()
+        if message_id:
+            message["Message-ID"] = message_id
         if in_reply_to:
             message["In-Reply-To"] = in_reply_to
         if references:

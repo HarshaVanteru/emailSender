@@ -12,6 +12,30 @@ def sync_mailbox(job_id: int):
 @celery_app.task(name="mailbox.maintenance", soft_time_limit=50, time_limit=60)
 def maintain_mailboxes():
     maintenance()
+    from app.core.database import SessionLocal
+    from app.features.mail_sync.historical import dispatch_pending
+    with SessionLocal() as db:
+        dispatch_pending(db, celery_app.send_task)
+        from app.workers.operations import dispatch
+        dispatch(db, celery_app.send_task)
+
+
+@celery_app.task(name="mailbox.historical")
+def historical_page(session_id: str):
+    from app.features.mail_sync.historical import process_page
+    process_page(session_id)
+
+
+@celery_app.task(name="mailbox.send", soft_time_limit=180, time_limit=240)
+def send_message(job_id: str):
+    from app.workers.operations import process
+    process("send", job_id)
+
+
+@celery_app.task(name="mailbox.ai", soft_time_limit=180, time_limit=240)
+def ai_suggestion(job_id: str):
+    from app.workers.operations import process
+    process("ai", job_id)
 
 
 @celery_app.task(name="mailbox.watch_renewal", soft_time_limit=900, time_limit=960)
